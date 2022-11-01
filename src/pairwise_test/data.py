@@ -2,19 +2,25 @@ from collections import defaultdict
 from torch.utils.data import Dataset, DataLoader
 import json
 
-CONTEXT_SENT_NUM = 5
+POS_TOP_K = 2
+NEG_TOP_K = 1
+CONTEXT_SENT_NUM = 1
+# special START, END token
+BERT_SPECIAL_TOKENS= ['[START]', '[END]']
+ROBERTA_SPECIAL_TOKENS = ['<start>', '<end>']
 
 class KBPCorefPair(Dataset):
-    def __init__(self, data_file):
-        self.data = self.load_data(data_file)
+    def __init__(self, data_file, add_mark='none'):
+        self.data = self.load_data(data_file, add_mark)
     
     def _get_event_cluster_id(self, event_id:str, clusters:list) -> str:
         for cluster in clusters:
             if event_id in cluster['events']:
                 return cluster['hopper_id']
-        return None
+        raise ValueError(f'Unknown event_id: {event_id}')
 
-    def load_data(self, data_file, context_k=5):
+    def load_data(self, data_file, add_mark:str, context_k=CONTEXT_SENT_NUM):
+        assert add_mark in ['none', 'bert', 'roberta', 'longformer']
         Data = []
         with open(data_file, 'rt', encoding='utf-8') as f:
             for line in f:
@@ -26,9 +32,11 @@ class KBPCorefPair(Dataset):
                     before =  ' '.join([
                         sent['text'] for sent in sentences[e['sent_idx'] - context_k if e['sent_idx'] >= context_k else 0 : e['sent_idx']]
                     ]).strip()
+                    before += ('' if add_mark=='none' else ' [START]' if add_mark=='bert' else ' <start>')
                     after = ' '.join([
                         sent['text'] for sent in sentences[e['sent_idx'] + 1 : e['sent_idx'] + context_k + 1 if e['sent_idx'] + context_k < len(sentences) else len(sentences)]
                     ]).strip()
+                    after = ('' if add_mark=='none' else '[END] ' if add_mark=='bert' else '<end> ') + after
                     new_event_sent = before + (' ' if len(before) > 0 else '') + sentences[e['sent_idx']]['text'] + ' ' + after
                     sent_start = e['sent_start'] + (len(before) + 1 if len(before) > 0 else 0)
                     sent_end = sent_start + len(e['trigger']) - 1
@@ -63,38 +71,49 @@ class KBPCorefPair(Dataset):
     def __getitem__(self, idx):
         return self.data[idx]
 
-class KBPCorefPairSmall(Dataset):
-    def __init__(self, data_file):
-        self.data = self.load_data(data_file)
+class KBPCorefPairTiny(Dataset):
+    def __init__(self, data_file, pos_top_k:int, neg_top_k:int, add_mark='none'):
+        self.data = self.load_data(data_file, pos_top_k, neg_top_k, add_mark)
     
     def _get_event_cluster_id(self, event_id:str, clusters:list) -> str:
         for cluster in clusters:
             if event_id in cluster['events']:
                 return cluster['hopper_id']
-        return None
+        raise ValueError(f'Unknown event_id: {event_id}')
 
-    def load_data(self, data_file, context_k=CONTEXT_SENT_NUM):
+    def load_data(self, data_file, pos_top_k:int, neg_top_k:int, add_mark:str, context_k=CONTEXT_SENT_NUM):
+
+        assert pos_top_k >= 0 and neg_top_k > 0
+        assert add_mark in ['none', 'bert', 'roberta', 'longformer']
 
         def create_event_simi_dict(event_pairs_id, event_pairs_cos, clusters):
             simi_dict = defaultdict(list)
             for id_pair, cos in zip(event_pairs_id, event_pairs_cos):
                 e1_id, e2_id = id_pair.split('###')
-                e1_cluster_id, e2_cluster_id = self._get_event_cluster_id(e1_id, clusters), self._get_event_cluster_id(e2_id, clusters)
-                simi_dict[e1_id].append({'id': e2_id, 'cos': cos, 'coref': 1 if e1_cluster_id == e2_cluster_id else 0})
-                simi_dict[e2_id].append({'id': e1_id, 'cos': cos, 'coref': 1 if e1_cluster_id == e2_cluster_id else 0})
+                coref = 1 if self._get_event_cluster_id(e1_id, clusters) == self._get_event_cluster_id(e2_id, clusters) else 0
+                simi_dict[e1_id].append({'id': e2_id, 'cos': cos, 'coref': coref})
+                simi_dict[e2_id].append({'id': e1_id, 'cos': cos, 'coref': coref})
             for simi_list in simi_dict.values():
                 simi_list.sort(key=lambda x:x['cos'], reverse=True)
             return simi_dict
         
-        def get_noncoref_ids(simi_list, top_k=1):
+        def get_noncoref_ids(simi_list, top_k):
             noncoref_ids = []
             for simi in simi_list:
                 if simi['coref'] == 0:
                     noncoref_ids.append(simi['id'])
                     if len(noncoref_ids) >= top_k:
                         break
-            assert len(noncoref_ids) <= top_k
             return noncoref_ids
+        
+        def get_coref_ids(simi_list, top_k):
+            coref_ids = []
+            for simi in simi_list[-1::-1]:
+                if simi['coref'] == 1:
+                    coref_ids.append(simi['id'])
+                    if len(coref_ids) >= top_k:
+                        break
+            return coref_ids
 
         Data = []
         with open(data_file, 'rt', encoding='utf-8') as f:
@@ -107,11 +126,13 @@ class KBPCorefPairSmall(Dataset):
                 events_list, events_dict = [], {}
                 for e in sample['events']:
                     before =  ' '.join([
-                        sent['text'] for sent in sentences[e['sent_idx'] - context_k if e['sent_idx'] >= context_k else 0:e['sent_idx']]
+                        sent['text'] for sent in sentences[e['sent_idx'] - context_k if e['sent_idx'] >= context_k else 0 : e['sent_idx']]
                     ]).strip()
+                    before += ('' if add_mark=='none' else ' [START]' if add_mark=='bert' else ' <start>')
                     after = ' '.join([
-                        sent['text'] for sent in sentences[e['sent_idx'] + 1:e['sent_idx'] + context_k + 1 if e['sent_idx'] + context_k < len(sentences) else len(sentences)]
+                        sent['text'] for sent in sentences[e['sent_idx'] + 1 : e['sent_idx'] + context_k + 1 if e['sent_idx'] + context_k < len(sentences) else len(sentences)]
                     ]).strip()
+                    after = ('' if add_mark=='none' else '[END] ' if add_mark=='bert' else '<end> ') + after
                     new_event_sent = before + (' ' if len(before) > 0 else '') + sentences[e['sent_idx']]['text'] + ' ' + after
                     sent_start = e['sent_start'] + (len(before) + 1 if len(before) > 0 else 0)
                     sent_end = sent_start + len(e['trigger']) - 1
@@ -131,26 +152,12 @@ class KBPCorefPairSmall(Dataset):
                         'sent_text': new_event_sent,  
                         'cluster_id': self._get_event_cluster_id(e['event_id'], clusters)
                     }
-                for i in range(len(events_list) - 1):
-                    event_1 = events_list[i]
-                    noncoref_event_ids = get_noncoref_ids(event_simi_dict[event_1['id']], top_k=2)
-                    for e_id in noncoref_event_ids: # non-coref
-                        event_2 = events_dict[e_id]
-                        Data.append({
-                            'id': sample['doc_id'], 
-                            'e1_offset': event_1['start'], 
-                            'e1_sen': event_1['sent_text'], 
-                            'e1_start': event_1['sent_start'], 
-                            'e1_end': event_1['sent_end'], 
-                            'e2_offset': event_2['start'], 
-                            'e2_sen': event_2['sent_text'], 
-                            'e2_start': event_2['sent_start'], 
-                            'e2_end': event_2['sent_end'], 
-                            'label': 0
-                        })
-                    for j in range(i + 1, len(events_list)): # coref
-                        event_2 = events_list[j]
-                        if event_1['cluster_id'] == event_2['cluster_id']:
+                if pos_top_k > 0:
+                    for event_1 in events_list:
+                        coref_event_ids = get_coref_ids(event_simi_dict[event_1['id']], top_k=pos_top_k)
+                        noncoref_event_ids = get_noncoref_ids(event_simi_dict[event_1['id']], top_k=neg_top_k)
+                        for e_id in coref_event_ids: # coref
+                            event_2 = events_dict[e_id]
                             Data.append({
                                 'id': sample['doc_id'], 
                                 'e1_offset': event_1['start'], 
@@ -163,6 +170,69 @@ class KBPCorefPairSmall(Dataset):
                                 'e2_end': event_2['sent_end'], 
                                 'label': 1
                             })
+                        for e_id in noncoref_event_ids: # non-coref
+                            event_2 = events_dict[e_id]
+                            Data.append({
+                                'id': sample['doc_id'], 
+                                'e1_offset': event_1['start'], 
+                                'e1_sen': event_1['sent_text'], 
+                                'e1_start': event_1['sent_start'], 
+                                'e1_end': event_1['sent_end'], 
+                                'e2_offset': event_2['start'], 
+                                'e2_sen': event_2['sent_text'], 
+                                'e2_start': event_2['sent_start'], 
+                                'e2_end': event_2['sent_end'], 
+                                'label': 0
+                            })
+                else:
+                    for i in range(len(events_list) - 1):
+                        event_1 = events_list[i]
+                        noncoref_event_ids = get_noncoref_ids(event_simi_dict[event_1['id']], top_k=neg_top_k)
+                        for e_id in noncoref_event_ids: # non-coref
+                            event_2 = events_dict[e_id]
+                            Data.append({
+                                'id': sample['doc_id'], 
+                                'e1_offset': event_1['start'], 
+                                'e1_sen': event_1['sent_text'], 
+                                'e1_start': event_1['sent_start'], 
+                                'e1_end': event_1['sent_end'], 
+                                'e2_offset': event_2['start'], 
+                                'e2_sen': event_2['sent_text'], 
+                                'e2_start': event_2['sent_start'], 
+                                'e2_end': event_2['sent_end'], 
+                                'label': 0
+                            })
+                        for j in range(i + 1, len(events_list)): # coref
+                            event_2 = events_list[j]
+                            if event_1['cluster_id'] == event_2['cluster_id']:
+                                Data.append({
+                                    'id': sample['doc_id'], 
+                                    'e1_offset': event_1['start'], 
+                                    'e1_sen': event_1['sent_text'], 
+                                    'e1_start': event_1['sent_start'], 
+                                    'e1_end': event_1['sent_end'], 
+                                    'e2_offset': event_2['start'], 
+                                    'e2_sen': event_2['sent_text'], 
+                                    'e2_start': event_2['sent_start'], 
+                                    'e2_end': event_2['sent_end'], 
+                                    'label': 1
+                                })
+                    final_event_1 = events_list[-1]
+                    noncoref_event_ids = get_noncoref_ids(event_simi_dict[final_event_1['id']], top_k=neg_top_k)
+                    for e_id in noncoref_event_ids: # non-coref
+                        event_2 = events_dict[e_id]
+                        Data.append({
+                            'id': sample['doc_id'], 
+                            'e1_offset': final_event_1['start'], 
+                            'e1_sen': final_event_1['sent_text'], 
+                            'e1_start': final_event_1['sent_start'], 
+                            'e1_end': final_event_1['sent_end'], 
+                            'e2_offset': event_2['start'], 
+                            'e2_sen': event_2['sent_text'], 
+                            'e2_start': event_2['sent_start'], 
+                            'e2_end': event_2['sent_end'], 
+                            'label': 0
+                        })
         return Data
 
     def __len__(self):
@@ -171,31 +241,14 @@ class KBPCorefPairSmall(Dataset):
     def __getitem__(self, idx):
         return self.data[idx]
 
-def print_data_statistic(data_file):
-    doc_list = []
-    with open(data_file, 'rt', encoding='utf-8') as f:
-        for line in f:
-            doc_list.append(json.loads(line.strip()))
-    doc_num = len(doc_list)
-    event_num = sum([len(doc['events']) for doc in doc_list])
-    cluster_num = sum([len(doc['clusters']) for doc in doc_list])
-    singleton_num = sum([1 if len(cluster['events']) == 1  else 0 
-                                for doc in doc_list for cluster in doc['clusters']])
-    print(f"Doc: {doc_num} | Event: {event_num} | Cluster: {cluster_num} | Singleton: {singleton_num}")
+def get_dataLoader(args, dataset, tokenizer, batch_size=None, shuffle=False, add_mark='none', collote_fn_type='normal'):
 
-train_data = KBPCorefPair('../../data/train_filtered.json')
-print_data_statistic('../../data/train_filtered.json')
-print(len(train_data))
-labels = [train_data[s_idx]['label'] for s_idx in range(len(train_data))]
-print('Coref:', labels.count(1), 'non-Coref:', labels.count(0))
+    assert add_mark in ['none', 'bert', 'roberta', 'longformer']
+    assert collote_fn_type in ['normal', 'with_mask']
 
-train_small_data = KBPCorefPairSmall('../../data/train_filtered_with_cos.json')
-print_data_statistic('../../data/train_filtered_with_cos.json')
-print(len(train_small_data))
-labels = [train_small_data[s_idx]['label'] for s_idx in range(len(train_small_data))]
-print('Coref:', labels.count(1), 'non-Coref:', labels.count(0))
-
-def get_dataLoader(args, dataset, tokenizer, batch_size=None, shuffle=False, collote_fn_type='normal'):
+    if add_mark != 'none':
+        special_start_end_tokens = BERT_SPECIAL_TOKENS if add_mark == 'bert' else  ROBERTA_SPECIAL_TOKENS
+        assert tokenizer.additional_special_tokens == special_start_end_tokens
 
     def _cut_sent(sent, e_char_start, e_char_end, max_length):
         before = ' '.join([c for c in sent[:e_char_start].split(' ') if c != ''][-max_length:]).strip()
@@ -205,7 +258,7 @@ def get_dataLoader(args, dataset, tokenizer, batch_size=None, shuffle=False, col
         assert new_sent[new_char_start:new_char_end+1] == trigger
         return new_sent, new_char_start, new_char_end
 
-    max_mention_length = (args.max_seq_length - 50) // 4
+    max_mention_length = (args.max_seq_length - 100) // 4
 
     def collote_fn(batch_samples):
         batch_sen_1, batch_sen_2, batch_event_idx, batch_label  = [], [], [], []
@@ -239,83 +292,81 @@ def get_dataLoader(args, dataset, tokenizer, batch_size=None, shuffle=False, col
                 e2_start = encoding.char_to_token(e2_char_start + 1, sequence_index=1)
             e2_end = encoding.char_to_token(e2_char_end, sequence_index=1)
             assert e1_start and e1_end and e2_start and e2_end
-            batch_e1_token_idx.append([[e1_start, e1_end]])
-            batch_e2_token_idx.append([[e2_start, e2_end]])
+            if add_mark == 'none': 
+                batch_e1_token_idx.append([[e1_start, e1_end]])
+                batch_e2_token_idx.append([[e2_start, e2_end]])
+            elif add_mark == 'bert':
+                batch_e1_token_idx.append([[e1_start - 1, e1_end + 1]])
+                batch_e2_token_idx.append([[e2_start - 1, e2_end + 1]])
+            else:
+                batch_e1_token_idx.append([[e1_start - 1, e1_end + 2]])
+                batch_e2_token_idx.append([[e2_start - 1, e2_end + 2]])
         return {
             'batch_inputs': batch_inputs, 
             'batch_e1_idx': batch_e1_token_idx, 
             'batch_e2_idx': batch_e2_token_idx, 
             'labels': batch_label
         }
-    
-#     def collote_fn_with_mask(batch_samples):
-#         batch_sen_1, batch_sen_2, batch_event_idx = [], [], []
-#         batch_label, batch_subtypes = [], []
-#         for sample in batch_samples:
-#             sen_1, e1_char_start, e1_char_end = _cut_sent(sample['e1_sen'], sample['e1_start'], sample['e1_end'], max_mention_length)
-#             sen_2, e2_char_start, e2_char_end = _cut_sent(sample['e2_sen'], sample['e2_start'], sample['e2_end'], max_mention_length)
-#             batch_sen_1.append(sen_1)
-#             batch_sen_2.append(sen_2)
-#             batch_event_idx.append(
-#                 (e1_char_start, e1_char_end, e2_char_start, e2_char_end)
-#             )
-#             batch_label.append(sample['label'])
-#             batch_subtypes.append([sample['e1_subtype'], sample['e2_subtype']])
-#         batch_inputs = tokenizer(
-#             batch_sen_1, 
-#             batch_sen_2, 
-#             max_length=args.max_seq_length, 
-#             padding=True, 
-#             truncation=True, 
-#             return_tensors="pt"
-#         )
-#         batch_inputs_with_mask = tokenizer(
-#             batch_sen_1, 
-#             batch_sen_2, 
-#             max_length=args.max_seq_length, 
-#             padding=True, 
-#             truncation=True, 
-#             return_tensors="pt"
-#         )
-#         batch_e1_token_idx, batch_e2_token_idx = [], []
-#         for sen_1, sen_2, event_idx in zip(batch_sen_1, batch_sen_2, batch_event_idx):
-#             e1_char_start, e1_char_end, e2_char_start, e2_char_end = event_idx
-#             encoding = tokenizer(sen_1, sen_2, max_length=args.max_seq_length, truncation=True)
-#             e1_start = encoding.char_to_token(e1_char_start, sequence_index=0)
-#             if not e1_start:
-#                 e1_start = encoding.char_to_token(e1_char_start + 1, sequence_index=0)
-#             e1_end = encoding.char_to_token(e1_char_end, sequence_index=0)
-#             e2_start = encoding.char_to_token(e2_char_start, sequence_index=1)
-#             if not e2_start:
-#                 e2_start = encoding.char_to_token(e2_char_start + 1, sequence_index=1)
-#             e2_end = encoding.char_to_token(e2_char_end, sequence_index=1)
-#             assert e1_start and e1_end and e2_start and e2_end
-#             batch_e1_token_idx.append([[e1_start, e1_end]])
-#             batch_e2_token_idx.append([[e2_start, e2_end]])
-#         for b_idx in range(len(batch_label)):
-#             e1_start, e1_end = batch_e1_token_idx[b_idx][0]
-#             e2_start, e2_end = batch_e2_token_idx[b_idx][0]
-#             batch_inputs_with_mask['input_ids'][b_idx][e1_start:e1_end+1] = tokenizer.mask_token_id
-#             batch_inputs_with_mask['input_ids'][b_idx][e2_start:e2_end+1] = tokenizer.mask_token_id
-#         return {
-#             'batch_inputs': batch_inputs, 
-#             'batch_inputs_with_mask': batch_inputs_with_mask, 
-#             'batch_e1_idx': batch_e1_token_idx, 
-#             'batch_e2_idx': batch_e2_token_idx, 
-#             'labels': batch_label, 
-#             'subtypes': batch_subtypes
-#         }
-    
 
-
+    def collote_fn_with_mask(batch_samples):
+        batch_sen_1, batch_sen_2, batch_event_idx, batch_label = [], [], [], []
+        for sample in batch_samples:
+            sen_1, e1_char_start, e1_char_end = _cut_sent(sample['e1_sen'], sample['e1_start'], sample['e1_end'], max_mention_length)
+            sen_2, e2_char_start, e2_char_end = _cut_sent(sample['e2_sen'], sample['e2_start'], sample['e2_end'], max_mention_length)
+            batch_sen_1.append(sen_1)
+            batch_sen_2.append(sen_2)
+            batch_event_idx.append(
+                (e1_char_start, e1_char_end, e2_char_start, e2_char_end)
+            )
+            batch_label.append(sample['label'])
+        batch_inputs = tokenizer(
+            batch_sen_1, 
+            batch_sen_2, 
+            max_length=args.max_seq_length, 
+            padding=True, 
+            truncation=True, 
+            return_tensors="pt"
+        )
+        batch_inputs_with_mask = tokenizer(
+            batch_sen_1, 
+            batch_sen_2, 
+            max_length=args.max_seq_length, 
+            padding=True, 
+            truncation=True, 
+            return_tensors="pt"
+        )
+        batch_e1_token_idx, batch_e2_token_idx = [], []
+        for sen_1, sen_2, event_idx in zip(batch_sen_1, batch_sen_2, batch_event_idx):
+            e1_char_start, e1_char_end, e2_char_start, e2_char_end = event_idx
+            encoding = tokenizer(sen_1, sen_2, max_length=args.max_seq_length, truncation=True)
+            e1_start = encoding.char_to_token(e1_char_start, sequence_index=0)
+            if not e1_start:
+                e1_start = encoding.char_to_token(e1_char_start + 1, sequence_index=0)
+            e1_end = encoding.char_to_token(e1_char_end, sequence_index=0)
+            e2_start = encoding.char_to_token(e2_char_start, sequence_index=1)
+            if not e2_start:
+                e2_start = encoding.char_to_token(e2_char_start + 1, sequence_index=1)
+            e2_end = encoding.char_to_token(e2_char_end, sequence_index=1)
+            assert e1_start and e1_end and e2_start and e2_end
+            batch_e1_token_idx.append([[e1_start, e1_end]])
+            batch_e2_token_idx.append([[e2_start, e2_end]])
+        for s_idx in range(len(batch_label)):
+            e1_start, e1_end = batch_e1_token_idx[s_idx][0]
+            e2_start, e2_end = batch_e2_token_idx[s_idx][0]
+            batch_inputs_with_mask['input_ids'][s_idx][e1_start:e1_end+1] = tokenizer.mask_token_id
+            batch_inputs_with_mask['input_ids'][s_idx][e2_start:e2_end+1] = tokenizer.mask_token_id
+        return {
+            'batch_inputs': batch_inputs, 
+            'batch_inputs_with_mask': batch_inputs_with_mask, 
+            'batch_e1_idx': batch_e1_token_idx, 
+            'batch_e2_idx': batch_e2_token_idx, 
+            'labels': batch_label
+        }
+    
     if collote_fn_type == 'normal':
         select_collote_fn = collote_fn
-#     elif collote_fn_type == 'with_mask':
-#         select_collote_fn = collote_fn_with_mask
-#     elif collote_fn_type == 'with_dist':
-#         select_collote_fn = collote_fn_with_dist
-#     elif collote_fn_type == 'with_mask_dist':
-#         select_collote_fn = collote_fn_with_mask_dist
+    elif collote_fn_type == 'with_mask':
+        select_collote_fn = collote_fn_with_mask
 
     return DataLoader(
         dataset, 
@@ -323,3 +374,29 @@ def get_dataLoader(args, dataset, tokenizer, batch_size=None, shuffle=False, col
         shuffle=shuffle, 
         collate_fn=select_collote_fn
     )
+
+if __name__ == '__main__':
+    
+    def print_data_statistic(data_file):
+        doc_list = []
+        with open(data_file, 'rt', encoding='utf-8') as f:
+            for line in f:
+                doc_list.append(json.loads(line.strip()))
+        doc_num = len(doc_list)
+        event_num = sum([len(doc['events']) for doc in doc_list])
+        cluster_num = sum([len(doc['clusters']) for doc in doc_list])
+        singleton_num = sum([1 if len(cluster['events']) == 1  else 0 
+                                    for doc in doc_list for cluster in doc['clusters']])
+        print(f"Doc: {doc_num} | Event: {event_num} | Cluster: {cluster_num} | Singleton: {singleton_num}")
+    
+    train_data = KBPCorefPair('../../data/train_filtered.json')
+    print_data_statistic('../../data/train_filtered.json')
+    print(len(train_data))
+    labels = [train_data[s_idx]['label'] for s_idx in range(len(train_data))]
+    print('Coref:', labels.count(1), 'non-Coref:', labels.count(0))
+
+    train_small_data = KBPCorefPairTiny('../../data/train_filtered_with_cos.json', pos_top_k=POS_TOP_K, neg_top_k=NEG_TOP_K)
+    print_data_statistic('../../data/train_filtered_with_cos.json')
+    print(len(train_small_data))
+    labels = [train_small_data[s_idx]['label'] for s_idx in range(len(train_small_data))]
+    print('Coref:', labels.count(1), 'non-Coref:', labels.count(0))

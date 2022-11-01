@@ -8,6 +8,11 @@ def parse_args():
         help="The output directory where the model checkpoints and predictions will be written.",
     )
     parser.add_argument("--train_file", default=None, type=str, required=True, help="The input training file.")
+    parser.add_argument("--train_data_type", default="normal", type=str, required=True, choices=['normal', 'tiny']
+    )
+    parser.add_argument("--neg_top_k",
+        default="2", type=int, help="choose k non-coref event for each event"
+    )
     parser.add_argument("--dev_file", default=None, type=str, required=True, help="The input evaluation file.")
     parser.add_argument("--test_file", default=None, type=str, required=True, help="The input testing file.")
     

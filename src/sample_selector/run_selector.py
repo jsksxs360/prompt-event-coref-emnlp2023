@@ -227,7 +227,7 @@ if __name__ == '__main__':
         test(args, test_dataset, model, tokenizer, save_weights)
     # Predicting
     if args.do_predict:
-        best_save_weight = 'epoch_24_dev_f1_69.4862_weights.bin'
+        best_save_weight = 'epoch_18_dev_f1_68.7229_weights.bin'
         logger.info(f'loading weights from {best_save_weight}...')
         model.load_state_dict(torch.load(os.path.join(args.output_dir, best_save_weight)))
         logger.info(f'calculating event cosine similarity of {best_save_weight}...')
