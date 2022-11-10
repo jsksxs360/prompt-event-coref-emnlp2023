@@ -163,30 +163,49 @@ def xml_parser(file_path:str, sent_list:List[Sentence]) -> Dict:
         'clusters': cluster_list
     }
 
-def split_dev(doc_list:list, valid_doc_num:int, valid_event_num:int, valid_chain_num:int):
+# def split_dev(doc_list:list, valid_doc_num:int, valid_event_num:int, valid_chain_num:int):
+#     '''split dev set from full train set
+#     '''
+#     docs_id = [doc['doc_id'] for doc in doc_list]
+#     docs_event_num = np.asarray([len(doc['events']) for doc in doc_list])
+#     docs_event_num[docs_id.index('bolt-eng-DF-170-181109-47916')] += 2
+#     docs_event_num[docs_id.index('bolt-eng-DF-170-181109-48534')] += 1
+#     docs_cluster_num = np.asarray([len(doc['clusters']) for doc in doc_list])
+#     logger.info(f'Train & Dev set: Doc: {len(docs_id)} | Event: {docs_event_num.sum()} | Cluster: {docs_cluster_num.sum()}')
+#     train_docs, dev_docs = [], []
+#     logger.info(f'finding the correct split...')
+#     for indexs in combinations(range(len(docs_id)), valid_doc_num):
+#         indexs = np.asarray(indexs)
+#         if (
+#             docs_event_num[indexs].sum() == valid_event_num and 
+#             docs_cluster_num[indexs].sum() == valid_chain_num
+#         ):
+#             logger.info(f'Done!')
+#             for idx, doc in enumerate(doc_list):
+#                 if idx in indexs:
+#                     dev_docs.append(doc)
+#                 else:
+#                     train_docs.append(doc)
+#             break
+#     return train_docs, dev_docs
+
+def split_dev(doc_list:list, train_doc_id_file:str, dev_doc_id_file:str):
     '''split dev set from full train set
     '''
-    docs_id = [doc['doc_id'] for doc in doc_list]
-    docs_event_num = np.asarray([len(doc['events']) for doc in doc_list])
-    docs_event_num[docs_id.index('bolt-eng-DF-170-181109-47916')] += 2
-    docs_event_num[docs_id.index('bolt-eng-DF-170-181109-48534')] += 1
-    docs_cluster_num = np.asarray([len(doc['clusters']) for doc in doc_list])
-    logger.info(f'Train & Dev set: Doc: {len(docs_id)} | Event: {docs_event_num.sum()} | Cluster: {docs_cluster_num.sum()}')
+    train_doc_ids, dev_doc_ids = set(), set()
+    with open(train_doc_id_file, 'rt') as train, open(dev_doc_id_file, 'rt') as dev:
+        for line in train:
+            train_doc_ids.add(line.strip())
+        for line in dev:
+            dev_doc_ids.add(line.strip())
     train_docs, dev_docs = [], []
-    logger.info(f'finding the correct split...')
-    for indexs in combinations(range(len(docs_id)), valid_doc_num):
-        indexs = np.asarray(indexs)
-        if (
-            docs_event_num[indexs].sum() == valid_event_num and 
-            docs_cluster_num[indexs].sum() == valid_chain_num
-        ):
-            logger.info(f'Done!')
-            for idx, doc in enumerate(doc_list):
-                if idx in indexs:
-                    dev_docs.append(doc)
-                else:
-                    train_docs.append(doc)
-            break
+    for doc in doc_list:
+        if doc['doc_id'] in train_doc_ids:
+            train_docs.append(doc)
+        elif doc['doc_id'] in dev_doc_ids:
+            dev_docs.append(doc)
+        else:
+            raise ValueError('Wrong Doc id:', doc['doc_id'])
     return train_docs, dev_docs
 
 if __name__ == "__main__":
@@ -200,7 +219,8 @@ if __name__ == "__main__":
         logger.info(f"Finished!")
         print_data_statistic(docs[f'kbp_{dataset}'], dataset)
     # split Dev set
-    train_docs, dev_docs = split_dev(docs['kbp_2015'] + docs['kbp_2016'], 82, 2382, 1502)
+    # train_docs, dev_docs = split_dev(docs['kbp_2015'] + docs['kbp_2016'], 82, 2382, 1502)
+    train_docs, dev_docs = split_dev(docs['kbp_2015'] + docs['kbp_2016'], 'xu22_train_doc_ids.txt', 'xu22_dev_doc_ids.txt')
     kbp_dataset = {
         'train': train_docs, 
         'dev': dev_docs, 
