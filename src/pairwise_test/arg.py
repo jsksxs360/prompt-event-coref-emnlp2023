@@ -8,13 +8,12 @@ def parse_args():
         help="The output directory where the model checkpoints and predictions will be written.",
     )
     parser.add_argument("--train_file", default=None, type=str, required=True, help="The input training file.")
-    parser.add_argument("--train_data_type", default="normal", type=str, required=True, choices=['normal', 'tiny']
-    )
-    parser.add_argument("--neg_top_k",
-        default="2", type=int, help="choose k non-coref event for each event"
-    )
+    parser.add_argument("--train_file_with_cos", default=None, type=str, required=False, help="The input training file with event similarity.")
     parser.add_argument("--dev_file", default=None, type=str, required=True, help="The input evaluation file.")
     parser.add_argument("--test_file", default=None, type=str, required=True, help="The input testing file.")
+    parser.add_argument("--data_include_mark", action="store_true", help="Whether use marks to locate triggers.")
+    parser.add_argument("--train_data_type", default="normal", type=str, required=True, choices=['normal', 'tiny'])
+    parser.add_argument("--neg_top_k", default="1", type=int, help="choose k non-coref event for each event")
     
     parser.add_argument("--model_type",
         default="bert", type=str, required=True
@@ -24,6 +23,7 @@ def parse_args():
         help="Path to pretrained model or model identifier from huggingface.co/models",
     )
     parser.add_argument("--max_seq_length", default=512, type=int, required=True)
+    parser.add_argument("--matching_style", default="cls", type=str, required=False, help="how to construct event-pair feature representation")
     
     parser.add_argument("--do_train", action="store_true", help="Whether to run training.")
     parser.add_argument("--do_test", action="store_true", help="Whether to run eval on the test set.")
