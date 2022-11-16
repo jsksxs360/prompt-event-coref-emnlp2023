@@ -12,8 +12,8 @@ from src.tools import seed_everything, NpEncoder
 from src.pairwise_test.arg import parse_args
 from src.pairwise_test.data import KBPCorefPair, KBPCorefPairTiny, get_dataLoader
 from src.pairwise_test.data import BERT_SPECIAL_TOKENS, ROBERTA_SPECIAL_TOKENS
-from src.pairwise_test.modeling import BertForPairwiseEC, RobertaForPairwiseEC
-from src.pairwise_test.modeling import BertForPairwiseECWithMask, RobertaForPairwiseECWithMask
+from src.pairwise_test.modeling import BertForPairwiseEC, RobertaForPairwiseEC, LongformerForPairwiseEC
+from src.pairwise_test.modeling import BertForPairwiseECWithMask, RobertaForPairwiseECWithMask, LongformerForPairwiseECWithMask
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
                     datefmt='%Y/%m/%d %H:%M:%S',
@@ -22,11 +22,13 @@ logger = logging.getLogger("Model")
 
 MODEL_CLASSES = {
     'bert': BertForPairwiseEC,
-    'roberta': RobertaForPairwiseEC
+    'roberta': RobertaForPairwiseEC, 
+    'longformer': LongformerForPairwiseEC
 }
 MODEL_MASK_CLASSES = {
     'bert': BertForPairwiseECWithMask,
-    'roberta': RobertaForPairwiseECWithMask
+    'roberta': RobertaForPairwiseECWithMask, 
+    'longformer': LongformerForPairwiseECWithMask
 }
 
 def to_device(args, batch_data):
@@ -130,7 +132,7 @@ def test(args, test_dataset, model, tokenizer, save_weights:list, add_mark, coll
     test_dataloader = get_dataLoader(args, test_dataset, tokenizer, add_mark=add_mark, collote_fn_type=collote_fn_type, shuffle=False)
     logger.info('***** Running testing *****')
     for save_weight in save_weights:
-        logger.info(f'loading weights from {save_weight}...')
+        logger.info(f'loading {save_weight}...')
         model.load_state_dict(torch.load(os.path.join(args.output_dir, save_weight)))
         metrics = test_loop(args, test_dataloader, model)
         with open(os.path.join(args.output_dir, 'test_metrics.txt'), 'at') as f:
@@ -198,6 +200,7 @@ if __name__ == '__main__':
             add_mark=args.model_type if args.data_include_mark else 'none', 
             context_k=5 if args.model_type == 'longformer' else 1
         )
+        logger.info(f'loading trained weights from {args.output_dir} ...')
         test(args, test_dataset, model, tokenizer, save_weights, 
             add_mark=args.model_type if args.data_include_mark else 'none', 
             collote_fn_type='with_mask' if args.model_subtype == 'mask_model' else 'normal'

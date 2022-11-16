@@ -297,8 +297,8 @@ def get_dataLoader(args, dataset, tokenizer, add_mark:str, collote_fn_type:str, 
     def collote_fn_with_mask(batch_samples):
         batch_sen_1, batch_sen_2, batch_event_idx, batch_label = [], [], [], []
         for sample in batch_samples:
-            sen_1, e1_char_start, e1_char_end = _cut_sent(sample['e1_sen'], sample['e1_start'], sample['e1_end'], max_mention_length)
-            sen_2, e2_char_start, e2_char_end = _cut_sent(sample['e2_sen'], sample['e2_start'], sample['e2_end'], max_mention_length)
+            sen_1, e1_char_start, e1_char_end = _cut_sent(sample['e1_sent'], sample['e1_start'], sample['e1_end'], max_mention_length)
+            sen_2, e2_char_start, e2_char_end = _cut_sent(sample['e2_sent'], sample['e2_start'], sample['e2_end'], max_mention_length)
             batch_sen_1.append(sen_1)
             batch_sen_2.append(sen_2)
             batch_event_idx.append(
