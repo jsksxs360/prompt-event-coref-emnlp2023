@@ -1,17 +1,18 @@
-export OUTPUT_DIR=./bert_mark_normal_results/
+export OUTPUT_DIR=./bert_mark_event_results/
 
 python3 run_pairwise.py \
     --output_dir=$OUTPUT_DIR \
     --model_type=bert \
+    --model_subtype=mark_model \
     --model_checkpoint=../../PT_MODELS/bert-large-cased/ \
-    --matching_style=cls \
+    --matching_style=event \
     --train_file=../../data/train_filtered.json \
     --train_file_with_cos=../../data/train_filtered_with_cos.json \
-    --data_include_mark \
-    --train_data_type=normal \
-    --neg_top_k=2 \
     --dev_file=../../data/dev_filtered.json \
     --test_file=../../data/test_filtered.json \
+    --train_data_type=tiny \
+    --neg_top_k=10 \
+    --data_include_mark \
     --max_seq_length=512 \
     --learning_rate=1e-5 \
     --num_train_epochs=10 \

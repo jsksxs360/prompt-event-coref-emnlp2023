@@ -2,15 +2,15 @@ from collections import defaultdict
 from torch.utils.data import Dataset, DataLoader
 import json
 
-CONTEXT_SENT_NUM = 1
-# special START, END token
+# special tokens
 BERT_SPECIAL_TOKENS= ['[START]', '[END]']
 ROBERTA_SPECIAL_TOKENS = ['<start>', '<end>']
+ADD_MARK_TYPE = ['none', 'bert', 'roberta', 'longformer']
 
 class KBPCorefPair(Dataset):
-    def __init__(self, data_file, add_mark='none'):
-        assert add_mark in ['none', 'bert', 'roberta', 'longformer']
-        self.data = self.load_data(data_file, add_mark)
+    def __init__(self, data_file:str, add_mark:str, context_k=1):
+        assert add_mark in ADD_MARK_TYPE
+        self.data = self.load_data(data_file, add_mark, context_k)
     
     def _get_event_cluster_id(self, event_id:str, clusters:list) -> str:
         for cluster in clusters:
@@ -18,7 +18,7 @@ class KBPCorefPair(Dataset):
                 return cluster['hopper_id']
         raise ValueError(f'Unknown event_id: {event_id}')
 
-    def load_data(self, data_file, add_mark:str, context_k=CONTEXT_SENT_NUM):
+    def load_data(self, data_file, add_mark:str, context_k):
         Data = []
         with open(data_file, 'rt', encoding='utf-8') as f:
             for line in f:
@@ -75,14 +75,14 @@ class KBPCorefPair(Dataset):
         return self.data[idx]
 
 class KBPCorefPairTiny(Dataset):
-    def __init__(self, data_file, data_file_with_cos, neg_top_k:int, add_mark='none'):
+    def __init__(self, data_file:str, data_file_with_cos:str, neg_top_k:int, add_mark:str, context_k=1):
         '''
         - data_file: source train data file
-        - data_file_with_cos: train data file with event similarity
+        - data_file_with_cos: train data file with event similarities
         '''
         assert neg_top_k > 0
-        assert add_mark in ['none', 'bert', 'roberta', 'longformer']
-        self.data = self.load_data(data_file, data_file_with_cos, neg_top_k, add_mark)
+        assert add_mark in ADD_MARK_TYPE
+        self.data = self.load_data(data_file, data_file_with_cos, neg_top_k, add_mark, context_k)
     
     def _get_event_cluster_id(self, event_id:str, clusters:list) -> str:
         for cluster in clusters:
@@ -90,7 +90,7 @@ class KBPCorefPairTiny(Dataset):
                 return cluster['hopper_id']
         raise ValueError(f'Unknown event_id: {event_id}')
 
-    def load_data(self, data_file, data_file_with_cos, neg_top_k:int, add_mark:str, context_k=CONTEXT_SENT_NUM):
+    def load_data(self, data_file, data_file_with_cos, neg_top_k:int, add_mark:str, context_k):
 
         def create_event_simi_dict(event_pairs_id, event_pairs_cos, clusters):
             simi_dict = defaultdict(list)
@@ -227,9 +227,9 @@ class KBPCorefPairTiny(Dataset):
     def __getitem__(self, idx):
         return self.data[idx]
 
-def get_dataLoader(args, dataset, tokenizer, batch_size=None, shuffle=False, add_mark='none', collote_fn_type='normal'):
+def get_dataLoader(args, dataset, tokenizer, add_mark:str, collote_fn_type:str, batch_size=None, shuffle=False):
 
-    assert add_mark in ['none', 'bert', 'roberta', 'longformer']
+    assert add_mark in ADD_MARK_TYPE
     assert collote_fn_type in ['normal', 'with_mask']
 
     if add_mark != 'none':
@@ -278,13 +278,13 @@ def get_dataLoader(args, dataset, tokenizer, batch_size=None, shuffle=False, add
                 e2_start = encoding.char_to_token(e2_char_start + 1, sequence_index=1)
             e2_end = encoding.char_to_token(e2_char_end, sequence_index=1)
             assert e1_start and e1_end and e2_start and e2_end
-            if add_mark == 'none': 
+            if add_mark == 'none': # no mark
                 batch_e1_token_idx.append([[e1_start, e1_end]])
                 batch_e2_token_idx.append([[e2_start, e2_end]])
-            elif add_mark == 'bert':
+            elif add_mark == 'bert': # [START] trigger [END]
                 batch_e1_token_idx.append([[e1_start - 1, e1_end + 1]])
                 batch_e2_token_idx.append([[e2_start - 1, e2_end + 1]])
-            else:
+            else: # <start> trigger <end>
                 batch_e1_token_idx.append([[e1_start - 1, e1_end + 2]])
                 batch_e2_token_idx.append([[e2_start - 1, e2_end + 2]])
         return {
@@ -294,65 +294,72 @@ def get_dataLoader(args, dataset, tokenizer, batch_size=None, shuffle=False, add
             'labels': batch_label
         }
 
-#     def collote_fn_with_mask(batch_samples):
-#         batch_sen_1, batch_sen_2, batch_event_idx, batch_label = [], [], [], []
-#         for sample in batch_samples:
-#             sen_1, e1_char_start, e1_char_end = _cut_sent(sample['e1_sen'], sample['e1_start'], sample['e1_end'], max_mention_length)
-#             sen_2, e2_char_start, e2_char_end = _cut_sent(sample['e2_sen'], sample['e2_start'], sample['e2_end'], max_mention_length)
-#             batch_sen_1.append(sen_1)
-#             batch_sen_2.append(sen_2)
-#             batch_event_idx.append(
-#                 (e1_char_start, e1_char_end, e2_char_start, e2_char_end)
-#             )
-#             batch_label.append(sample['label'])
-#         batch_inputs = tokenizer(
-#             batch_sen_1, 
-#             batch_sen_2, 
-#             max_length=args.max_seq_length, 
-#             padding=True, 
-#             truncation=True, 
-#             return_tensors="pt"
-#         )
-#         batch_inputs_with_mask = tokenizer(
-#             batch_sen_1, 
-#             batch_sen_2, 
-#             max_length=args.max_seq_length, 
-#             padding=True, 
-#             truncation=True, 
-#             return_tensors="pt"
-#         )
-#         batch_e1_token_idx, batch_e2_token_idx = [], []
-#         for sen_1, sen_2, event_idx in zip(batch_sen_1, batch_sen_2, batch_event_idx):
-#             e1_char_start, e1_char_end, e2_char_start, e2_char_end = event_idx
-#             encoding = tokenizer(sen_1, sen_2, max_length=args.max_seq_length, truncation=True)
-#             e1_start = encoding.char_to_token(e1_char_start, sequence_index=0)
-#             if not e1_start:
-#                 e1_start = encoding.char_to_token(e1_char_start + 1, sequence_index=0)
-#             e1_end = encoding.char_to_token(e1_char_end, sequence_index=0)
-#             e2_start = encoding.char_to_token(e2_char_start, sequence_index=1)
-#             if not e2_start:
-#                 e2_start = encoding.char_to_token(e2_char_start + 1, sequence_index=1)
-#             e2_end = encoding.char_to_token(e2_char_end, sequence_index=1)
-#             assert e1_start and e1_end and e2_start and e2_end
-#             batch_e1_token_idx.append([[e1_start, e1_end]])
-#             batch_e2_token_idx.append([[e2_start, e2_end]])
-#         for s_idx in range(len(batch_label)):
-#             e1_start, e1_end = batch_e1_token_idx[s_idx][0]
-#             e2_start, e2_end = batch_e2_token_idx[s_idx][0]
-#             batch_inputs_with_mask['input_ids'][s_idx][e1_start:e1_end+1] = tokenizer.mask_token_id
-#             batch_inputs_with_mask['input_ids'][s_idx][e2_start:e2_end+1] = tokenizer.mask_token_id
-#         return {
-#             'batch_inputs': batch_inputs, 
-#             'batch_inputs_with_mask': batch_inputs_with_mask, 
-#             'batch_e1_idx': batch_e1_token_idx, 
-#             'batch_e2_idx': batch_e2_token_idx, 
-#             'labels': batch_label
-#         }
+    def collote_fn_with_mask(batch_samples):
+        batch_sen_1, batch_sen_2, batch_event_idx, batch_label = [], [], [], []
+        for sample in batch_samples:
+            sen_1, e1_char_start, e1_char_end = _cut_sent(sample['e1_sen'], sample['e1_start'], sample['e1_end'], max_mention_length)
+            sen_2, e2_char_start, e2_char_end = _cut_sent(sample['e2_sen'], sample['e2_start'], sample['e2_end'], max_mention_length)
+            batch_sen_1.append(sen_1)
+            batch_sen_2.append(sen_2)
+            batch_event_idx.append(
+                (e1_char_start, e1_char_end, e2_char_start, e2_char_end)
+            )
+            batch_label.append(sample['label'])
+        batch_inputs = tokenizer(
+            batch_sen_1, 
+            batch_sen_2, 
+            max_length=args.max_seq_length, 
+            padding=True, 
+            truncation=True, 
+            return_tensors="pt"
+        )
+        batch_inputs_with_mask = tokenizer(
+            batch_sen_1, 
+            batch_sen_2, 
+            max_length=args.max_seq_length, 
+            padding=True, 
+            truncation=True, 
+            return_tensors="pt"
+        )
+        batch_e1_token_idx, batch_e2_token_idx = [], []
+        for sen_1, sen_2, event_idx in zip(batch_sen_1, batch_sen_2, batch_event_idx):
+            e1_char_start, e1_char_end, e2_char_start, e2_char_end = event_idx
+            encoding = tokenizer(sen_1, sen_2, max_length=args.max_seq_length, truncation=True)
+            e1_start = encoding.char_to_token(e1_char_start, sequence_index=0)
+            if not e1_start:
+                e1_start = encoding.char_to_token(e1_char_start + 1, sequence_index=0)
+            e1_end = encoding.char_to_token(e1_char_end, sequence_index=0)
+            e2_start = encoding.char_to_token(e2_char_start, sequence_index=1)
+            if not e2_start:
+                e2_start = encoding.char_to_token(e2_char_start + 1, sequence_index=1)
+            e2_end = encoding.char_to_token(e2_char_end, sequence_index=1)
+            assert e1_start and e1_end and e2_start and e2_end
+            if add_mark == 'none': # no mark
+                batch_e1_token_idx.append([[e1_start, e1_end]])
+                batch_e2_token_idx.append([[e2_start, e2_end]])
+            elif add_mark == 'bert': # [START] trigger [END]
+                batch_e1_token_idx.append([[e1_start - 1, e1_end + 1]])
+                batch_e2_token_idx.append([[e2_start - 1, e2_end + 1]])
+            else: # <start> trigger <end>
+                batch_e1_token_idx.append([[e1_start - 1, e1_end + 2]])
+                batch_e2_token_idx.append([[e2_start - 1, e2_end + 2]])
+        for s_idx in range(len(batch_label)):
+            e1_start, e1_end = batch_e1_token_idx[s_idx][0]
+            e2_start, e2_end = batch_e2_token_idx[s_idx][0]
+            batch_inputs_with_mask['input_ids'][s_idx][e1_start:e1_end+1] = tokenizer.mask_token_id
+            batch_inputs_with_mask['input_ids'][s_idx][e2_start:e2_end+1] = tokenizer.mask_token_id
+        return {
+            'batch_inputs': batch_inputs, 
+            'batch_inputs_with_mask': batch_inputs_with_mask, 
+            'batch_e1_idx': batch_e1_token_idx, 
+            'batch_e2_idx': batch_e2_token_idx, 
+            'labels': batch_label
+        }
     
     if collote_fn_type == 'normal':
         select_collote_fn = collote_fn
-#     elif collote_fn_type == 'with_mask':
-#         select_collote_fn = collote_fn_with_mask
+    elif collote_fn_type == 'with_mask':
+        select_collote_fn = collote_fn_with_mask
 
     return DataLoader(
         dataset, 

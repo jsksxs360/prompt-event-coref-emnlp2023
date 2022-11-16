@@ -13,7 +13,7 @@ from src.pairwise_test.arg import parse_args
 from src.pairwise_test.data import KBPCorefPair, KBPCorefPairTiny, get_dataLoader
 from src.pairwise_test.data import BERT_SPECIAL_TOKENS, ROBERTA_SPECIAL_TOKENS
 from src.pairwise_test.modeling import BertForPairwiseEC, RobertaForPairwiseEC
-from src.pairwise_test.modeling import BertForPairwiseECwithMark, RobertaForPairwiseECwithMark
+from src.pairwise_test.modeling import BertForPairwiseECWithMask, RobertaForPairwiseECWithMask
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
                     datefmt='%Y/%m/%d %H:%M:%S',
@@ -24,15 +24,15 @@ MODEL_CLASSES = {
     'bert': BertForPairwiseEC,
     'roberta': RobertaForPairwiseEC
 }
-MODEL_MARK_CLASSES = {
-    'bert': BertForPairwiseECwithMark,
-    'roberta': RobertaForPairwiseECwithMark
+MODEL_MASK_CLASSES = {
+    'bert': BertForPairwiseECWithMask,
+    'roberta': RobertaForPairwiseECWithMask
 }
 
 def to_device(args, batch_data):
     new_batch_data = {}
     for k, v in batch_data.items():
-        if k == 'batch_inputs':
+        if k == 'batch_inputs' or k == 'batch_inputs_with_mask':
             new_batch_data[k] = {
                 k_: v_.to(args.device) for k_, v_ in v.items()
             }
@@ -76,10 +76,10 @@ def test_loop(args, dataloader, model):
             true_labels += [int(label) for label in labels]
     return classification_report(true_labels, true_predictions, output_dict=True)
 
-def train(args, train_dataset, dev_dataset, model, tokenizer):
+def train(args, train_dataset, dev_dataset, model, tokenizer, add_mark, collote_fn_type):
     """ Train the model """
-    train_dataloader = get_dataLoader(args, train_dataset, tokenizer, shuffle=True)
-    dev_dataloader = get_dataLoader(args, dev_dataset, tokenizer, shuffle=False)
+    train_dataloader = get_dataLoader(args, train_dataset, tokenizer, add_mark=add_mark, collote_fn_type=collote_fn_type, shuffle=True)
+    dev_dataloader = get_dataLoader(args, dev_dataset, tokenizer, add_mark=add_mark, collote_fn_type=collote_fn_type, shuffle=False)
     t_total = len(train_dataloader) * args.num_train_epochs
     # Prepare optimizer and schedule (linear warmup and decay)
     no_decay = ["bias", "LayerNorm.weight"]
@@ -104,6 +104,7 @@ def train(args, train_dataset, dev_dataset, model, tokenizer):
     logger.info("***** Running training *****")
     logger.info(f"Num examples - {len(train_dataset)}")
     logger.info(f"Num Epochs - {args.num_train_epochs}")
+    logger.info(f"Batch Size - {args.batch_size}")
     logger.info(f"Total optimization steps - {t_total}")
     with open(os.path.join(args.output_dir, 'args.txt'), 'wt') as f:
         f.write(str(args))
@@ -125,8 +126,8 @@ def train(args, train_dataset, dev_dataset, model, tokenizer):
             f.write(f'epoch_{epoch+1}\n' + json.dumps(metrics, cls=NpEncoder) + '\n\n')
     logger.info("Done!")
 
-def test(args, test_dataset, model, tokenizer, save_weights:list):
-    test_dataloader = get_dataLoader(args, test_dataset, tokenizer, shuffle=False)
+def test(args, test_dataset, model, tokenizer, save_weights:list, add_mark, collote_fn_type):
+    test_dataloader = get_dataLoader(args, test_dataset, tokenizer, add_mark=add_mark, collote_fn_type=collote_fn_type, shuffle=False)
     logger.info('***** Running testing *****')
     for save_weight in save_weights:
         logger.info(f'loading weights from {save_weight}...')
@@ -150,32 +151,54 @@ if __name__ == '__main__':
     logger.info(f'loading pretrained model and tokenizer of {args.model_type} ...')
     config = AutoConfig.from_pretrained(args.model_checkpoint, cache_dir=args.cache_dir)
     tokenizer = AutoTokenizer.from_pretrained(args.model_checkpoint, cache_dir=args.cache_dir)
-    if args.data_include_mark:
-        special_start_end_tokens = BERT_SPECIAL_TOKENS if args.model_type == 'bert' else  ROBERTA_SPECIAL_TOKENS
-        logger.info(f"adding special mark tokens {special_start_end_tokens} to tokenizer...")
-        special_tokens_dict = {'additional_special_tokens': special_start_end_tokens}
-        tokenizer.add_special_tokens(special_tokens_dict)
-        assert tokenizer.additional_special_tokens == special_start_end_tokens
     args.num_labels = 2
-    model = (MODEL_MARK_CLASSES if args.data_include_mark else MODEL_CLASSES)[args.model_type].from_pretrained(
+    model = (MODEL_MASK_CLASSES if args.model_subtype == 'mask_model' else MODEL_CLASSES)[args.model_type].from_pretrained(
         args.model_checkpoint,
         config=config,
         cache_dir=args.cache_dir, 
         args=args
     ).to(args.device)
     if args.data_include_mark:
+        special_start_end_tokens = BERT_SPECIAL_TOKENS if args.model_type == 'bert' else  ROBERTA_SPECIAL_TOKENS
+        logger.info(f"adding special mark tokens {special_start_end_tokens} to tokenizer...")
+        special_tokens_dict = {'additional_special_tokens': special_start_end_tokens}
+        tokenizer.add_special_tokens(special_tokens_dict)
+        assert tokenizer.additional_special_tokens == special_start_end_tokens
         model.resize_token_embeddings(len(tokenizer))
     # Training
     if args.do_train:
         if args.train_data_type == 'normal':
-            train_dataset = KBPCorefPair(args.train_file, add_mark=args.model_type) if args.data_include_mark else KBPCorefPair(args.train_file)
+            train_dataset = KBPCorefPair(
+                args.train_file, 
+                add_mark=args.model_type if args.data_include_mark else 'none', 
+                context_k=5 if args.model_type == 'longformer' else 1
+            )
         else:
-            train_dataset = KBPCorefPairTiny(args.train_file, args.train_file_with_cos, neg_top_k=args.neg_top_k, add_mark=args.model_type) if args.data_include_mark \
-            else KBPCorefPairTiny(args.train_file, args.train_file_with_cos, neg_top_k=args.neg_top_k)
-        dev_dataset = KBPCorefPair(args.dev_file, add_mark=args.model_type) if args.data_include_mark else KBPCorefPair(args.dev_file)
-        train(args, train_dataset, dev_dataset, model, tokenizer)
+            train_dataset = KBPCorefPairTiny(
+                args.train_file, 
+                args.train_file_with_cos, 
+                neg_top_k=args.neg_top_k, 
+                add_mark=args.model_type if args.data_include_mark else 'none', 
+                context_k=5 if args.model_type == 'longformer' else 1
+            )
+        dev_dataset = KBPCorefPair(
+            args.dev_file, 
+            add_mark=args.model_type if args.data_include_mark else 'none', 
+            context_k=5 if args.model_type == 'longformer' else 1
+        )
+        train(args, train_dataset, dev_dataset, model, tokenizer, 
+            add_mark=args.model_type if args.data_include_mark else 'none', 
+            collote_fn_type='with_mask' if args.model_subtype == 'mask_model' else 'normal'
+        )
     # Testing
     save_weights = [file for file in os.listdir(args.output_dir) if file.endswith('.bin')]
     if args.do_test:
-        test_dataset = KBPCorefPair(args.test_file, add_mark=args.model_type) if args.data_include_mark else KBPCorefPair(args.test_file)
-        test(args, test_dataset, model, tokenizer, save_weights)
+        test_dataset = KBPCorefPair(
+            args.test_file, 
+            add_mark=args.model_type if args.data_include_mark else 'none', 
+            context_k=5 if args.model_type == 'longformer' else 1
+        )
+        test(args, test_dataset, model, tokenizer, save_weights, 
+            add_mark=args.model_type if args.data_include_mark else 'none', 
+            collote_fn_type='with_mask' if args.model_subtype == 'mask_model' else 'normal'
+        )
