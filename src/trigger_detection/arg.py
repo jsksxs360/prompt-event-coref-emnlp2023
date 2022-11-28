@@ -31,6 +31,7 @@ def parse_args():
     parser.add_argument("--use_addition_layer", help="Whether add FFNN/CNN layer before classifier.", 
         default="none", type=str, choices=['none', 'ffnn', 'cnn']
     )
+    parser.add_argument("--addition_layer_dim", type=int, required=False)
     parser.add_argument("--learning_rate", default=1e-5, type=float, help="The initial learning rate for Adam.")
     parser.add_argument("--crf_learning_rate", default=5e-5, type=float, help="The initial learning rate for crf.")
     parser.add_argument("--num_train_epochs", default=3, type=int, help="Total number of training epochs to perform.")

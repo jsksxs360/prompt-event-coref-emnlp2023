@@ -4,6 +4,7 @@ from torch import nn
 from torch.nn import CrossEntropyLoss
 from transformers import LongformerPreTrainedModel, LongformerModel
 from transformers import BigBirdPreTrainedModel, BigBirdModel
+from transformers.activations import ACT2FN
 
 class CRF(nn.Module):
     """Conditional random field.
@@ -422,16 +423,19 @@ class LongformerSoftmaxForTD(LongformerPreTrainedModel):
         self.use_addition_layer = args.use_addition_layer
         if self.use_addition_layer == 'ffnn':
             self.ffnn = nn.Sequential(
-                nn.Linear(config.hidden_size, config.hidden_size), 
-                nn.Tanh(), 
+                nn.Linear(config.hidden_size, args.addition_layer_dim if args.addition_layer_dim else config.hidden_size), 
+                ACT2FN[config.hidden_act]() if config.hidden_act else nn.Tanh(), 
                 nn.Dropout(config.hidden_dropout_prob)
             )
         elif self.use_addition_layer == 'cnn':
             self.cnn_block = nn.Sequential(
-                nn.Conv1d(config.hidden_size, config.hidden_size, kernel_size=5, stride=1, padding='same'), 
+                nn.Conv1d(
+                    config.hidden_size, args.addition_layer_dim if args.addition_layer_dim else config.hidden_size, 
+                    kernel_size=5, stride=1, padding='same'
+                ), 
                 nn.MaxPool1d(kernel_size=5, stride=1, padding=2)
             )
-        self.classifier = nn.Linear(config.hidden_size, self.num_labels)
+        self.classifier = nn.Linear(args.addition_layer_dim if args.addition_layer_dim else config.hidden_size, self.num_labels)
         self.post_init()
     
     def forward(self, batch_inputs, labels=None):
@@ -469,16 +473,19 @@ class BigBirdSoftmaxForTD(BigBirdPreTrainedModel):
         self.use_addition_layer = args.use_addition_layer
         if self.use_addition_layer == 'ffnn':
             self.ffnn = nn.Sequential(
-                nn.Linear(config.hidden_size, config.hidden_size), 
-                nn.Tanh(), 
+                nn.Linear(config.hidden_size, args.addition_layer_dim if args.addition_layer_dim else config.hidden_size), 
+                ACT2FN[config.hidden_act]() if config.hidden_act else nn.Tanh(), 
                 nn.Dropout(config.hidden_dropout_prob)
             )
         elif self.use_addition_layer == 'cnn':
             self.cnn_block = nn.Sequential(
-                nn.Conv1d(config.hidden_size, config.hidden_size, kernel_size=5, stride=1, padding='same'), 
+                nn.Conv1d(
+                    config.hidden_size, args.addition_layer_dim if args.addition_layer_dim else config.hidden_size, 
+                    kernel_size=5, stride=1, padding='same'
+                ), 
                 nn.MaxPool1d(kernel_size=5, stride=1, padding=2)
             )
-        self.classifier = nn.Linear(config.hidden_size, self.num_labels)
+        self.classifier = nn.Linear(args.addition_layer_dim if args.addition_layer_dim else config.hidden_size, self.num_labels)
         self.post_init()
 
     def forward(self, batch_inputs, labels=None):
@@ -516,16 +523,19 @@ class LongformerCRFForTD(LongformerPreTrainedModel):
         self.use_addition_layer = args.use_addition_layer
         if self.use_addition_layer == 'ffnn':
             self.ffnn = nn.Sequential(
-                nn.Linear(config.hidden_size, config.hidden_size), 
-                nn.Tanh(), 
+                nn.Linear(config.hidden_size, args.addition_layer_dim if args.addition_layer_dim else config.hidden_size), 
+                ACT2FN[config.hidden_act]() if config.hidden_act else nn.Tanh(), 
                 nn.Dropout(config.hidden_dropout_prob)
             )
         elif self.use_addition_layer == 'cnn':
             self.cnn_block = nn.Sequential(
-                nn.Conv1d(config.hidden_size, config.hidden_size, kernel_size=5, stride=1, padding='same'), 
+                nn.Conv1d(
+                    config.hidden_size, args.addition_layer_dim if args.addition_layer_dim else config.hidden_size, 
+                    kernel_size=5, stride=1, padding='same'
+                ), 
                 nn.MaxPool1d(kernel_size=5, stride=1, padding=2)
             )
-        self.classifier = nn.Linear(config.hidden_size, self.num_labels)
+        self.classifier = nn.Linear(args.addition_layer_dim if args.addition_layer_dim else config.hidden_size, self.num_labels)
         self.crf = CRF(num_tags=self.num_labels, batch_first=True)
         self.post_init()
     
@@ -557,16 +567,19 @@ class BigBirdCRFForTD(BigBirdPreTrainedModel):
         self.use_addition_layer = args.use_addition_layer
         if self.use_addition_layer == 'ffnn':
             self.ffnn = nn.Sequential(
-                nn.Linear(config.hidden_size, config.hidden_size), 
-                nn.Tanh(), 
+                nn.Linear(config.hidden_size, args.addition_layer_dim if args.addition_layer_dim else config.hidden_size), 
+                ACT2FN[config.hidden_act]() if config.hidden_act else nn.Tanh(), 
                 nn.Dropout(config.hidden_dropout_prob)
             )
         elif self.use_addition_layer == 'cnn':
             self.cnn_block = nn.Sequential(
-                nn.Conv1d(config.hidden_size, config.hidden_size, kernel_size=5, stride=1, padding='same'), 
+                nn.Conv1d(
+                    config.hidden_size, args.addition_layer_dim if args.addition_layer_dim else config.hidden_size, 
+                    kernel_size=5, stride=1, padding='same'
+                ), 
                 nn.MaxPool1d(kernel_size=5, stride=1, padding=2)
             )
-        self.classifier = nn.Linear(config.hidden_size, self.num_labels)
+        self.classifier = nn.Linear(args.addition_layer_dim if args.addition_layer_dim else config.hidden_size, self.num_labels)
         self.crf = CRF(num_tags=self.num_labels, batch_first=True)
         self.post_init()
 
