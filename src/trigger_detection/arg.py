@@ -29,7 +29,7 @@ def parse_args():
         help="Where do you want to store the pre-trained models downloaded from s3"
     )
     parser.add_argument("--use_addition_layer", help="Whether add FFNN/CNN layer before classifier.", 
-        default="none", type=str, choices=['none', 'ffnn', 'cnn']
+        default="none", type=str, choices=['none', 'ffnn', 'cnn', 'cnn_pool']
     )
     parser.add_argument("--addition_layer_dim", type=int, required=False)
     parser.add_argument("--learning_rate", default=1e-5, type=float, help="The initial learning rate for Adam.")

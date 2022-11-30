@@ -10,7 +10,7 @@ python3 run_td_softmax.py \
     --test_file=../../data/test_filtered.json \
     --max_seq_length=4096 \
     --learning_rate=1e-5 \
-    --num_train_epochs=10 \
+    --num_train_epochs=15 \
     --batch_size=1 \
     --do_train \
     --warmup_proportion=0. \

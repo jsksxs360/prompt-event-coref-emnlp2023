@@ -11,7 +11,7 @@ from seqeval.scheme import IOB2
 import sys
 sys.path.append('../../')
 from src.trigger_detection.data import KBPTrigger, get_dataLoader, CATEGORIES
-from src.trigger_detection.modeling import LongformerSoftmaxForTD, BigBirdSoftmaxForTD
+from src.trigger_detection.modeling import LongformerSoftmaxForTD
 from src.trigger_detection.arg import parse_args
 from src.tools import seed_everything, NpEncoder
 
@@ -19,11 +19,6 @@ logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s - %(message)s
                     datefmt='%Y/%m/%d %H:%M:%S',
                     level=logging.INFO)
 logger = logging.getLogger("Model")
-
-MODEL_CLASSES = {
-    'longformer': LongformerSoftmaxForTD, 
-    'bigbird': BigBirdSoftmaxForTD
-}
 
 def to_device(args, batch_data):
     new_batch_data = {}
@@ -213,7 +208,7 @@ if __name__ == '__main__':
         cache_dir=args.cache_dir
     )
     tokenizer = AutoTokenizer.from_pretrained(args.model_checkpoint, cache_dir=args.cache_dir)
-    model = MODEL_CLASSES[args.model_type].from_pretrained(
+    model = LongformerSoftmaxForTD.from_pretrained(
         args.model_checkpoint,
         config=config,
         cache_dir=args.cache_dir, 
