@@ -315,8 +315,8 @@ def get_dataLoader(args, dataset, tokenizer, add_mark:str, collote_fn_type:str, 
     assert add_mark in ADD_MARK_TYPE
     assert collote_fn_type in ['normal']
     assert prompt_type in [
-        'pb_d',        # prompt_base + document
-        'k_pb_d'       # knowledge + prompt_base + document
+        'pb_d',    # prompt_base + document
+        'k_pb_d'   # knowledge + prompt_base + document
     ]
 
     special_start_end_tokens = BERT_SPECIAL_TOKENS if add_mark == 'bert' else  ROBERTA_SPECIAL_TOKENS
@@ -338,7 +338,7 @@ def get_dataLoader(args, dataset, tokenizer, add_mark:str, collote_fn_type:str, 
         )
         mask_token = '[MASK]' if add_mark=='bert' else '<mask>'
         if prompt_type == 'pb_d': # prompt_base + document
-            prompt = f'In this document, {l_token1} {e1_trigger} {l_token2} {e2_trigger} {l_token3} {mask_token} {l_token4}. '
+            prompt = f'In this document, {l_token1} {e1_trigger} {l_token2} {l_token3} {e2_trigger} {l_token4} {l_token5} {mask_token} {l_token6}. '
             encoding = tokenizer(prompt, max_length=args.max_seq_length, truncation=True)
             mask_idx = encoding.char_to_token(prompt.find(mask_token))
             assert mask_idx is not None
@@ -347,7 +347,7 @@ def get_dataLoader(args, dataset, tokenizer, add_mark:str, collote_fn_type:str, 
             prompt += source_sent
         elif prompt_type == 'k_pb_d': # knowledge + prompt_base + document
             knowledge = 'Events that correspond to the same event usually have related trigger words (predicates) and compatible entities (participants, time, location). '
-            prompt = knowledge + f'In this document, {l_token1} {e1_trigger} {l_token2} {e2_trigger} {l_token3} {mask_token} {l_token4}. '
+            prompt = knowledge + f'In this document, {l_token1} {e1_trigger} {l_token2} {l_token3} {e2_trigger} {l_token4} {l_token5} {mask_token} {l_token6}. '
             encoding = tokenizer(prompt, max_length=args.max_seq_length, truncation=True)
             mask_idx = encoding.char_to_token(prompt.find(mask_token))
             assert mask_idx is not None
@@ -437,14 +437,15 @@ if __name__ == '__main__':
 
     train_small_data = KBPCorefTiny(
         '../../data/train_filtered.json', '../../data/train_filtered_with_cos.json', 
-        pos_top_k=0, neg_top_k=10, add_mark='longformer', context_k=1, tokenizer=tokenizer, max_length=10
+        pos_top_k=0, neg_top_k=10, add_mark='longformer', context_k=2, tokenizer=tokenizer, max_length=482
     )
     print_data_statistic('../../data/train_filtered_with_cos.json')
     print(len(train_small_data))
     labels = [train_small_data[s_idx]['label'] for s_idx in range(len(train_small_data))]
     print('Coref:', labels.count(1), 'non-Coref:', labels.count(0))
     train_data = iter(train_small_data)
-    for _ in range(5):
+    for _ in range(100):
+        print('='*30)
         print(next(train_data))
     
     train_dataloader = get_dataLoader(args, train_small_data, tokenizer, add_mark='longformer', collote_fn_type='normal', prompt_type='pb_d', shuffle=True)

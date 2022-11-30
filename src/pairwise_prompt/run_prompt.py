@@ -30,6 +30,7 @@ PROMPT_LENGTH = {
     'pb_d': 30,    # prompt_base + document
     'k_pb_d': 60   # knowledge + prompt_base + document
 }
+CONTEXT_K = 2
 
 def to_device(args, batch_data):
     new_batch_data = {}
@@ -173,7 +174,7 @@ if __name__ == '__main__':
             train_dataset = KBPCoref(
                 args.train_file, 
                 add_mark=args.model_type, 
-                context_k=5 if args.model_type == 'longformer' else 1, 
+                context_k=CONTEXT_K, 
                 tokenizer=tokenizer, 
                 max_length=args.max_seq_length - PROMPT_LENGTH[args.prompt_type]
             )
@@ -184,14 +185,14 @@ if __name__ == '__main__':
                 pos_top_k=args.pos_top_k, 
                 neg_top_k=args.neg_top_k, 
                 add_mark=args.model_type, 
-                context_k=5 if args.model_type == 'longformer' else 1, 
+                context_k=CONTEXT_K, 
                 tokenizer=tokenizer, 
                 max_length=args.max_seq_length - PROMPT_LENGTH[args.prompt_type]
             )
         dev_dataset = KBPCoref(
             args.dev_file, 
             add_mark=args.model_type, 
-            context_k=5 if args.model_type == 'longformer' else 1, 
+            context_k=CONTEXT_K, 
             tokenizer=tokenizer, 
             max_length=args.max_seq_length - PROMPT_LENGTH[args.prompt_type]
         )
@@ -204,7 +205,7 @@ if __name__ == '__main__':
         test_dataset = KBPCoref(
             args.test_file, 
             add_mark=args.model_type, 
-            context_k=5 if args.model_type == 'longformer' else 1, 
+            context_k=CONTEXT_K, 
             tokenizer=tokenizer, 
             max_length=args.max_seq_length - PROMPT_LENGTH[args.prompt_type]
         )
