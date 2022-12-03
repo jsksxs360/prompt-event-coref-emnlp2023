@@ -1,6 +1,16 @@
 from collections import defaultdict
 from torch.utils.data import Dataset, DataLoader
 import json
+import numpy as np
+from tqdm.auto import tqdm
+
+SUBTYPES = [ # 18 subtypes
+    'artifact', 'transferownership', 'transaction', 'broadcast', 'contact', 'demonstrate', \
+    'injure', 'transfermoney', 'transportartifact', 'attack', 'meet', 'elect', \
+    'endposition', 'correspondence', 'arrestjail', 'startposition', 'transportperson', 'die'
+]
+id2subtype = {idx: c for idx, c in enumerate(SUBTYPES, start=1)}
+subtype2id = {v: k for k, v in id2subtype.items()}
 
 # special tokens
 BERT_SPECIAL_TOKENS= [
@@ -11,7 +21,6 @@ ROBERTA_SPECIAL_TOKENS = [
     '<event1_start>', '<event1_end>', '<event2_start>', '<event2_end>', 
     '<l_token1>', '<l_token2>', '<l_token3>', '<l_token4>', '<l_token5>', '<l_token6>'
 ]
-COREF_TOKEN, NONCOREF_TOKEN = 'same', 'different'
 ADD_MARK_TYPE = ['bert', 'roberta', 'longformer']
 
 def create_new_event_sent(
@@ -20,96 +29,146 @@ def create_new_event_sent(
     sents:list, sents_lens:list, 
     add_mark:str, context_k:int, max_length:int
     ):
-    context_before =  ' '.join([
-        sent['text'] for sent in sents[sent1_idx - context_k if sent1_idx >= context_k else 0 : sent1_idx]
-    ]).strip()
-    context_before_length = sum([
-        sent_len for sent_len in sents_lens[sent1_idx - context_k if sent1_idx >= context_k else 0 : sent1_idx]
-    ])
-    context_next = ' '.join([
-        sent['text'] for sent in sents[sent2_idx + 1 : sent2_idx + context_k + 1 if sent2_idx + context_k < len(sents) else len(sents)]
-    ]).strip()
-    context_next_length = sum([
-        sent_len for sent_len in sents_lens[sent2_idx + 1 : sent2_idx + context_k + 1 if sent2_idx + context_k < len(sents) else len(sents)]
-    ])
+
+    '''
+    create segment contains two event mentions
+
+    segment format: xxx E1_START trigger1 E1_END xxx E2_START trigger2 E2_END xxx
+
+    Return:
+    {
+        'new_sent': new segment contains two event mentions, 
+        'e1_sent_start': trigger1 position, 
+        'e1_trigger': trigger1, 
+        'e1s_sent_start': E1_START position, 
+        'e1e_sent_start': E1_END position, 
+        'e2_sent_start': trigger2 position, 
+        'e2_trigger': trigger2, 
+        'e2s_sent_start': E2_START position, 
+        'e2e_sent_start': E2_END position
+    }
+    '''
+
+    context_before =  ' '.join([sent['text'] for sent in sents[sent1_idx - context_k if sent1_idx >= context_k else 0 : sent1_idx]]).strip()
+    context_before_length = sum([sent_len for sent_len in sents_lens[sent1_idx - context_k if sent1_idx >= context_k else 0 : sent1_idx]])
+    context_next = ' '.join([sent['text'] for sent in sents[sent2_idx + 1 : sent2_idx + context_k + 1 if sent2_idx + context_k < len(sents) else len(sents)]]).strip()
+    context_next_length = sum([sent_len for sent_len in sents_lens[sent2_idx + 1 : sent2_idx + context_k + 1 if sent2_idx + context_k < len(sents) else len(sents)]])
+
+    e1s, e1e, e2s, e2e = ( # bert
+        '[EVENT1_START]', '[EVENT1_END]', '[EVENT2_START]', '[EVENT2_END]'
+    ) if add_mark=='bert' else ( # roberta & longformer
+        '<event1_start>', '<event1_end>', '<event2_start>', '<event2_end>'
+    )
+
     if sent1_idx == sent2_idx: # two events in the same sentence
-        sent_text = sents[sent1_idx]['text']
         assert e1_sent_start < e2_sent_start
+        sent_text = sents[sent1_idx]['text']
         before, middle, next = sent_text[:e1_sent_start], sent_text[e1_sent_start + len(e1_trigger):e2_sent_start], sent_text[e2_sent_start + len(e2_trigger):]
-        new_sent = context_before + (' ' if len(context_before) > 0 else '') + before + ('[EVENT1_START] ' if add_mark=='bert' else '<event1_start> ')
-        e1_new_sent_start, e1_new_sent_end = len(new_sent), len(new_sent) + len(e1_trigger) - 1
-        new_sent += (
-            e1_trigger + (' [EVENT1_END]' if add_mark=='bert' else ' <event1_end>') + ('' if middle.startswith(' ') else ' ') + middle + \
-            ('[EVENT2_START] ' if add_mark=='bert' else '<event2_start> ')
-        )
-        e2_new_sent_start, e2_new_sent_end = len(new_sent), len(new_sent) + len(e2_trigger) - 1
-        new_sent += (e2_trigger + (' [EVENT2_END]' if add_mark=='bert' else ' <event2_end>') + ('' if next.startswith(' ') else ' ') + next + ' ' + context_next)
-        assert new_sent[e1_new_sent_start:e1_new_sent_end+1] == e1_trigger
-        assert new_sent[e2_new_sent_start:e2_new_sent_end+1] == e2_trigger
+        new_sent_before, new_sent_middle, new_sent_next = f'{context_before} {before}{e1s}'.strip(), f'{e1e}{middle}{e2s}', f'{e2e}{next} {context_next}'.strip()
+        new_sent = f'{new_sent_before}{e1_trigger}{new_sent_middle}{e2_trigger}{new_sent_next}'
+        e1_new_sent_start = len(new_sent_before)
+        e1s_new_sent_start = e1_new_sent_start - len(e1s)
+        e1e_new_sent_start = e1_new_sent_start + len(e1_trigger)
+        e2_new_sent_start = len(new_sent_before) + len(e1_trigger) + len(new_sent_middle)
+        e2s_new_sent_start = e2_new_sent_start - len(e2s)
+        e2e_new_sent_start = e2_new_sent_start + len(e2_trigger)
+        
+        assert new_sent[e1_new_sent_start:e1_new_sent_start + len(e1_trigger)] == e1_trigger
+        assert new_sent[e1s_new_sent_start:e1s_new_sent_start + len(e1s)] == e1s
+        assert new_sent[e1e_new_sent_start:e1e_new_sent_start + len(e1e)] == e1e
+        assert new_sent[e2_new_sent_start:e2_new_sent_start + len(e2_trigger)] == e2_trigger
+        assert new_sent[e2s_new_sent_start:e2s_new_sent_start + len(e2s)] == e2s
+        assert new_sent[e2e_new_sent_start:e2e_new_sent_start + len(e2e)] == e2e
         return {
             'new_sent': new_sent, 
-            'e1_sent_start': e1_new_sent_start, 
-            'e1_sent_end': e1_new_sent_end, 
             'e1_trigger': e1_trigger, 
-            'e2_sent_start': e2_new_sent_start, 
-            'e2_sent_end': e2_new_sent_end, 
+            'e1_sent_start': e1_new_sent_start, 
+            'e1s_sent_start': e1s_new_sent_start, 
+            'e1e_sent_start': e1e_new_sent_start, 
             'e2_trigger': e2_trigger, 
+            'e2_sent_start': e2_new_sent_start, 
+            'e2s_sent_start': e2s_new_sent_start, 
+            'e2e_sent_start': e2e_new_sent_start
         }
     else: # events in different sentence
-        # create new sentence for event 1
+        # new sentence of event 1
         before_1, next_1 = sents[sent1_idx]['text'][:e1_sent_start], sents[sent1_idx]['text'][e1_sent_start + len(e1_trigger):]
-        new_sent1 = context_before + (' ' if len(context_before) > 0 else '') + before_1 + ('[EVENT1_START] ' if add_mark=='bert' else '<event1_start> ')
-        e1_new_sent_start, e1_new_sent_end = len(new_sent1), len(new_sent1) + len(e1_trigger) - 1
-        new_sent1 += (e1_trigger + (' [EVENT1_END]' if add_mark=='bert' else ' <event1_end>') + ('' if next_1.startswith(' ') else ' ') + next_1)
-        # create new sentence for event 2
+        new_sent1_before, new_sent1_next = f'{context_before} {before_1}{e1s}'.strip(), f'{e1e}{next_1}'
+        new_sent1 = f'{new_sent1_before}{e1_trigger}{new_sent1_next}'
+        e1_new_sent_start = len(new_sent1_before)
+        e1s_new_sent_start = e1_new_sent_start - len(e1s)
+        e1e_new_sent_start = e1_new_sent_start + len(e1_trigger)
+        # new sentence of event 2
         before_2, next_2 = sents[sent2_idx]['text'][:e2_sent_start], sents[sent2_idx]['text'][e2_sent_start + len(e2_trigger):]
-        new_sent2 = before_2 + ('[EVENT2_START] ' if add_mark=='bert' else '<event2_start> ')
-        e2_new_sent_start, e2_new_sent_end = len(new_sent2), len(new_sent2) + len(e2_trigger) - 1
-        new_sent2 += (e2_trigger + (' [EVENT2_END]' if add_mark=='bert' else ' <event2_end>') + ('' if next_2.startswith(' ') else ' ') + next_2 + ' ' + context_next)
-        length = context_before_length + sents_lens[sent1_idx] + sents_lens[sent2_idx] + context_next_length + 8
+        new_sent2_before, new_sent2_next = f'{before_2}{e2s}'.strip(), f'{e2e}{next_2} {context_next}'.strip()
+        new_sent2 = f'{new_sent2_before}{e2_trigger}{new_sent2_next}'
+        e2_new_sent_start = len(new_sent2_before)
+        e2s_new_sent_start = e2_new_sent_start - len(e2s)
+        e2e_new_sent_start = e2_new_sent_start + len(e2_trigger)
+        # add sentences between new_sent1 and new_sent2
+        total_length = context_before_length + sents_lens[sent1_idx] + sents_lens[sent2_idx] + context_next_length + 8 # plus 8 special tokens
         p, q = sent1_idx + 1, sent2_idx - 1
         while p <= q:
             if p == q:
-                if length + sents_lens[p] <= max_length:
+                if total_length + sents_lens[p] <= max_length:
                     new_sent1 += (' ' + sents[p]['text'])
                 final_new_sent = new_sent1 + ' ' + new_sent2
-                e2_new_sent_start, e2_new_sent_end = e2_new_sent_start + len(new_sent1) + 1, e2_new_sent_end + len(new_sent1) + 1
-                assert final_new_sent[e1_new_sent_start:e1_new_sent_end+1] == e1_trigger
-                assert final_new_sent[e2_new_sent_start:e2_new_sent_end+1] == e2_trigger
+                e2_new_sent_start += len(new_sent1) + 1
+                e2s_new_sent_start += len(new_sent1) + 1
+                e2e_new_sent_start += len(new_sent1) + 1
+                
+                assert final_new_sent[e1_new_sent_start:e1_new_sent_start + len(e1_trigger)] == e1_trigger
+                assert final_new_sent[e1s_new_sent_start:e1s_new_sent_start + len(e1s)] == e1s
+                assert final_new_sent[e1e_new_sent_start:e1e_new_sent_start + len(e1e)] == e1e
+                assert final_new_sent[e2_new_sent_start:e2_new_sent_start + len(e2_trigger)] == e2_trigger
+                assert final_new_sent[e2s_new_sent_start:e2s_new_sent_start + len(e2s)] == e2s
+                assert final_new_sent[e2e_new_sent_start:e2e_new_sent_start + len(e2e)] == e2e
                 return {
                     'new_sent': final_new_sent, 
-                    'e1_sent_start': e1_new_sent_start, 
-                    'e1_sent_end': e1_new_sent_end, 
                     'e1_trigger': e1_trigger, 
+                    'e1_sent_start': e1_new_sent_start, 
+                    'e1s_sent_start': e1s_new_sent_start, 
+                    'e1e_sent_start': e1e_new_sent_start, 
+                    'e2_trigger': e2_trigger, 
                     'e2_sent_start': e2_new_sent_start, 
-                    'e2_sent_end': e2_new_sent_end, 
-                    'e2_trigger': e2_trigger
+                    'e2s_sent_start': e2s_new_sent_start, 
+                    'e2e_sent_start': e2e_new_sent_start
                 }
-            if length + sents_lens[p] > max_length:
+            if total_length + sents_lens[p] > max_length:
                 break
             else:
-                length += sents_lens[p]
+                total_length += sents_lens[p]
                 new_sent1 += (' ' + sents[p]['text'])
-            if length + sents_lens[q] > max_length:
+            if total_length + sents_lens[q] > max_length:
                 break
             else:
-                length += sents_lens[q]
+                total_length += sents_lens[q]
                 new_sent2 = sents[q]['text'] + ' ' + new_sent2
-                e2_new_sent_start, e2_new_sent_end = e2_new_sent_start + len(sents[q]['text']) + 1, e2_new_sent_end + len(sents[q]['text']) + 1
+                e2_new_sent_start += len(sents[q]['text']) + 1
+                e2s_new_sent_start += len(sents[q]['text']) + 1
+                e2e_new_sent_start += len(sents[q]['text']) + 1
             p += 1
             q -= 1
         final_new_sent = new_sent1 + ' ' + new_sent2
-        e2_new_sent_start, e2_new_sent_end = e2_new_sent_start + len(new_sent1) + 1, e2_new_sent_end + len(new_sent1) + 1
-        assert final_new_sent[e1_new_sent_start:e1_new_sent_end+1] == e1_trigger
-        assert final_new_sent[e2_new_sent_start:e2_new_sent_end+1] == e2_trigger
+        e2_new_sent_start += len(new_sent1) + 1
+        e2s_new_sent_start += len(new_sent1) + 1
+        e2e_new_sent_start += len(new_sent1) + 1
+        assert final_new_sent[e1s_new_sent_start:e1s_new_sent_start + len(e1s)] == e1s
+        assert final_new_sent[e1e_new_sent_start:e1e_new_sent_start + len(e1e)] == e1e
+        assert final_new_sent[e2s_new_sent_start:e2s_new_sent_start + len(e2s)] == e2s
+        assert final_new_sent[e2e_new_sent_start:e2e_new_sent_start + len(e2e)] == e2e
+        assert final_new_sent[e1_new_sent_start:e1_new_sent_start + len(e1_trigger)] == e1_trigger
+        assert final_new_sent[e2_new_sent_start:e2_new_sent_start + len(e2_trigger)] == e2_trigger
         return {
             'new_sent': final_new_sent, 
-            'e1_sent_start': e1_new_sent_start, 
-            'e1_sent_end': e1_new_sent_end, 
             'e1_trigger': e1_trigger, 
+            'e1_sent_start': e1_new_sent_start, 
+            'e1s_sent_start': e1s_new_sent_start, 
+            'e1e_sent_start': e1e_new_sent_start, 
+            'e2_trigger': e2_trigger, 
             'e2_sent_start': e2_new_sent_start, 
-            'e2_sent_end': e2_new_sent_end, 
-            'e2_trigger': e2_trigger
+            'e2s_sent_start': e2s_new_sent_start, 
+            'e2e_sent_start': e2e_new_sent_start
         }
 
 class KBPCoref(Dataset):
@@ -146,14 +205,18 @@ class KBPCoref(Dataset):
                         Data.append({
                             'id': sample['doc_id'], 
                             'sent': new_event_sent['new_sent'], 
-                            'e1_offset': event_1['start'], 
-                            'e1_start': new_event_sent['e1_sent_start'], 
-                            'e1_end': new_event_sent['e1_sent_end'], 
+                            'e1_offset': event_1['start'], # event1
                             'e1_trigger': new_event_sent['e1_trigger'], 
-                            'e2_offset': event_2['start'], 
-                            'e2_start': new_event_sent['e2_sent_start'], 
-                            'e2_end': new_event_sent['e2_sent_end'], 
+                            'e1_subtype': event_1['subtype'], 
+                            'e1_start': new_event_sent['e1_sent_start'], 
+                            'e1s_start': new_event_sent['e1s_sent_start'], 
+                            'e1e_start': new_event_sent['e1e_sent_start'], 
+                            'e2_offset': event_2['start'], # event2
                             'e2_trigger': new_event_sent['e2_trigger'], 
+                            'e2_subtype': event_2['subtype'], 
+                            'e2_start': new_event_sent['e2_sent_start'], 
+                            'e2s_start': new_event_sent['e2s_sent_start'], 
+                            'e2e_start': new_event_sent['e2e_sent_start'], 
                             'label': 1 if event_1_cluster_id == event_2_cluster_id else 0
                         })
         return Data
@@ -236,14 +299,18 @@ class KBPCorefTiny(Dataset):
                                 Data.append({
                                     'id': sample['doc_id'], 
                                     'sent': new_event_sent['new_sent'], 
-                                    'e1_offset': event_1['start'], 
-                                    'e1_start': new_event_sent['e1_sent_start'], 
-                                    'e1_end': new_event_sent['e1_sent_end'], 
+                                    'e1_offset': event_1['start'], # event1
                                     'e1_trigger': new_event_sent['e1_trigger'], 
-                                    'e2_offset': event_2['start'], 
-                                    'e2_start': new_event_sent['e2_sent_start'], 
-                                    'e2_end': new_event_sent['e2_sent_end'], 
+                                    'e1_subtype': event_1['subtype'], 
+                                    'e1_start': new_event_sent['e1_sent_start'], 
+                                    'e1s_start': new_event_sent['e1s_sent_start'], 
+                                    'e1e_start': new_event_sent['e1e_sent_start'], 
+                                    'e2_offset': event_2['start'], # event2
                                     'e2_trigger': new_event_sent['e2_trigger'], 
+                                    'e2_subtype': event_2['subtype'], 
+                                    'e2_start': new_event_sent['e2_sent_start'], 
+                                    'e2s_start': new_event_sent['e2s_sent_start'], 
+                                    'e2e_start': new_event_sent['e2e_sent_start'], 
                                     'label': 1
                                 })
             for line in f_cos:
@@ -268,14 +335,18 @@ class KBPCorefTiny(Dataset):
                                 Data.append({
                                     'id': sample['doc_id'], 
                                     'sent': new_event_sent['new_sent'], 
-                                    'e1_offset': event_1['start'], 
-                                    'e1_start': new_event_sent['e1_sent_start'], 
-                                    'e1_end': new_event_sent['e1_sent_end'], 
+                                    'e1_offset': event_1['start'], # event1
                                     'e1_trigger': new_event_sent['e1_trigger'], 
-                                    'e2_offset': event_2['start'], 
-                                    'e2_start': new_event_sent['e2_sent_start'], 
-                                    'e2_end': new_event_sent['e2_sent_end'], 
+                                    'e1_subtype': event_1['subtype'], 
+                                    'e1_start': new_event_sent['e1_sent_start'], 
+                                    'e1s_start': new_event_sent['e1s_sent_start'], 
+                                    'e1e_start': new_event_sent['e1e_sent_start'], 
+                                    'e2_offset': event_2['start'], # event2
                                     'e2_trigger': new_event_sent['e2_trigger'], 
+                                    'e2_subtype': event_2['subtype'], 
+                                    'e2_start': new_event_sent['e2_sent_start'], 
+                                    'e2s_start': new_event_sent['e2s_sent_start'], 
+                                    'e2e_start': new_event_sent['e2e_sent_start'], 
                                     'label': 1
                                 })
                 for i in range(len(events_list)):
@@ -292,14 +363,18 @@ class KBPCorefTiny(Dataset):
                             Data.append({
                                 'id': sample['doc_id'], 
                                 'sent': new_event_sent['new_sent'], 
-                                'e1_offset': event_1['start'], 
-                                'e1_start': new_event_sent['e1_sent_start'], 
-                                'e1_end': new_event_sent['e1_sent_end'], 
+                                'e1_offset': event_1['start'], # event1
                                 'e1_trigger': new_event_sent['e1_trigger'], 
-                                'e2_offset': event_2['start'], 
-                                'e2_start': new_event_sent['e2_sent_start'], 
-                                'e2_end': new_event_sent['e2_sent_end'], 
+                                'e1_subtype': event_1['subtype'], 
+                                'e1_start': new_event_sent['e1_sent_start'], 
+                                'e1s_start': new_event_sent['e1s_sent_start'], 
+                                'e1e_start': new_event_sent['e1e_sent_start'], 
+                                'e2_offset': event_2['start'], # event2
                                 'e2_trigger': new_event_sent['e2_trigger'], 
+                                'e2_subtype': event_2['subtype'], 
+                                'e2_start': new_event_sent['e2_sent_start'], 
+                                'e2s_start': new_event_sent['e2s_sent_start'], 
+                                'e2e_start': new_event_sent['e2e_sent_start'], 
                                 'label': 0
                             })
         return Data
@@ -310,65 +385,85 @@ class KBPCorefTiny(Dataset):
     def __getitem__(self, idx):
         return self.data[idx]
 
-def get_dataLoader(args, dataset, tokenizer, add_mark:str, collote_fn_type:str, prompt_type:str, batch_size:int=None, shuffle:bool=False):
+def get_dataLoader(args, dataset, tokenizer, add_mark:str, collote_fn_type:str, prompt_type:str, verbalizer:dict, batch_size:int=None, shuffle:bool=False):
 
     assert add_mark in ADD_MARK_TYPE
     assert collote_fn_type in ['normal']
     assert prompt_type in [
+        'pmb_d',   # prompt_manual_base + document
+        'pmq_d',   # prompt_manual_question + document
         'pb_d',    # prompt_base + document
         'k_pb_d'   # knowledge + prompt_base + document
     ]
 
-    special_start_end_tokens = BERT_SPECIAL_TOKENS if add_mark == 'bert' else  ROBERTA_SPECIAL_TOKENS
+    if add_mark == 'bert':
+        special_start_end_tokens = BERT_SPECIAL_TOKENS
+        e1s_token, e1e_token, e2s_token, e2e_token = '[EVENT1_START]', '[EVENT1_END]', '[EVENT2_START]', '[EVENT2_END]'
+        l_token1, l_token2, l_token3, l_token4, l_token5, l_token6 = '[L_TOKEN1]', '[L_TOKEN2]', '[L_TOKEN3]', '[L_TOKEN4]', '[L_TOKEN5]', '[L_TOKEN6]'
+        mask_token = '[MASK]'
+    else:
+        special_start_end_tokens = ROBERTA_SPECIAL_TOKENS
+        e1s_token, e1e_token, e2s_token, e2e_token = '<event1_start>', '<event1_end>', '<event2_start>', '<event2_end>'
+        l_token1, l_token2, l_token3, l_token4, l_token5, l_token6 = '<l_token1>', '<l_token2>', '<l_token3>', '<l_token4>', '<l_token5>', '<l_token6>'
+        mask_token = '<mask>'
     assert tokenizer.additional_special_tokens == special_start_end_tokens
 
-    pos_id = tokenizer.convert_tokens_to_ids(COREF_TOKEN)
-    neg_id = tokenizer.convert_tokens_to_ids(NONCOREF_TOKEN)
+    pos_id = tokenizer.convert_tokens_to_ids(verbalizer['COREF_TOKEN'])
+    neg_id = tokenizer.convert_tokens_to_ids(verbalizer['NONCOREF_TOKEN'])
 
     def get_prompt(
         source_sent, 
-        e1_trigger, e1_start, 
-        e2_trigger, e2_start, 
-        add_mark
+        e1_trigger, e1_start, e1s_start, e1e_start, 
+        e2_trigger, e2_start, e2s_start, e2e_start
         ):
-        l_token1, l_token2, l_token3, l_token4, l_token5, l_token6 = (
-            '[L_TOKEN1]', '[L_TOKEN2]', '[L_TOKEN3]', '[L_TOKEN4]', '[L_TOKEN5]', '[L_TOKEN6]'
-        ) if add_mark=='bert' else (
-            '<l_token1>', '<l_token2>', '<l_token3>', '<l_token4>', '<l_token5>', '<l_token6>'
-        )
-        mask_token = '[MASK]' if add_mark=='bert' else '<mask>'
-        if prompt_type == 'pb_d': # prompt_base + document
-            prompt = f'In this document, {l_token1} {e1_trigger} {l_token2} {l_token3} {e2_trigger} {l_token4} {l_token5} {mask_token} {l_token6}. '
-            encoding = tokenizer(prompt, max_length=args.max_seq_length, truncation=True)
-            mask_idx = encoding.char_to_token(prompt.find(mask_token))
-            assert mask_idx is not None
-            e1_start += len(prompt)
-            e2_start += len(prompt)
-            prompt += source_sent
-        elif prompt_type == 'k_pb_d': # knowledge + prompt_base + document
-            knowledge = 'Events that correspond to the same event usually have related trigger words (predicates) and compatible entities (participants, time, location). '
-            prompt = knowledge + f'In this document, {l_token1} {e1_trigger} {l_token2} {l_token3} {e2_trigger} {l_token4} {l_token5} {mask_token} {l_token6}. '
-            encoding = tokenizer(prompt, max_length=args.max_seq_length, truncation=True)
-            mask_idx = encoding.char_to_token(prompt.find(mask_token))
-            assert mask_idx is not None
-            e1_start += len(prompt)
-            e2_start += len(prompt)
-            prompt += source_sent
+        knowledge = 'Events that correspond to the same event usually have related trigger words (predicates) and compatible entities (participants, time, location). '
+        if 'pmb_d' in prompt_type: # manual prompt
+            prompt = f'In this document, the {e1s_token} {e1_trigger} {e1e_token} event and the {e2s_token} {e2_trigger} {e2e_token} event refer to {mask_token} event. '
+            if prompt_type == 'k_pmb_d': 
+                prompt = knowledge + prompt
+        elif 'pmq_d' in prompt_type: # manual question-style prompt
+            prompt = f'In this document, the {e1s_token} {e1_trigger} {e1e_token} event and the {e2s_token} {e2_trigger} {e2e_token} event refer to the same event? {mask_token}. '
+            if prompt_type == 'k_pmq_d':
+                prompt = knowledge + prompt
+        elif 'pb_d' in prompt_type: # learnable prompt
+            prompt = f'In this document, {l_token1} {e1s_token} {e1_trigger} {e1e_token} {l_token2} {l_token3} {e2s_token} {e2_trigger} {e2e_token} {l_token4} {l_token5} {mask_token} {l_token6}. '
+            if prompt_type == 'k_pb_d': 
+                prompt = knowledge + prompt
+        
+        e1_start, e1s_start, e1e_start = np.asarray([e1_start, e1s_start, e1e_start]) + np.full((3,), len(prompt))
+        e2_start, e2s_start, e2e_start = np.asarray([e2_start, e2s_start, e2e_start]) + np.full((3,), len(prompt))
+        prompt += source_sent
+        assert prompt[e1_start:e1_start + len(e1_trigger)] == e1_trigger
+        assert prompt[e1s_start:e1s_start + len(e1s_token)] == e1s_token
+        assert prompt[e1e_start:e1e_start + len(e1e_token)] == e1e_token
+        assert prompt[e2_start:e2_start + len(e2_trigger)] == e2_trigger
+        assert prompt[e2s_start:e2s_start + len(e2s_token)] == e2s_token
+        assert prompt[e2e_start:e2e_start + len(e2e_token)] == e2e_token
+        # convert char offsets to token idxs
+        encoding = tokenizer(prompt, max_length=args.max_seq_length, truncation=True)
+        mask_idx = encoding.char_to_token(prompt.find(mask_token))
+        e1_idx, e1s_idx, e1e_idx = encoding.char_to_token(e1_start), encoding.char_to_token(e1s_start), encoding.char_to_token(e1e_start)
+        e2_idx, e2s_idx, e2e_idx = encoding.char_to_token(e2_start), encoding.char_to_token(e2s_start), encoding.char_to_token(e2e_start)
+        assert None not in [mask_idx, e1_idx, e1s_idx, e1e_idx, e2_idx, e2s_idx, e2e_idx]
+        
         return {
             'prompt': prompt, 
             'mask_idx': mask_idx, 
-            'e1_start': e1_start, 
-            'e2_start': e2_start
+            'e1_idx': e1_idx, 
+            'e1s_idx': e1s_idx, 
+            'e1e_idx': e1e_idx, 
+            'e2_start': e2_idx, 
+            'e2s_idx': e2s_idx,
+            'e2e_idx': e2e_idx
         }
 
     def collote_fn(batch_samples):
-        batch_sen, batch_mask_idx, batch_coref  = [], [], []
+        batch_sen, batch_mask_idx, batch_coref = [], [], []
         for sample in batch_samples:
             prompt_data = get_prompt(
                 sample['sent'], 
-                sample['e1_trigger'], sample['e1_start'], 
-                sample['e2_trigger'], sample['e2_start'], 
-                add_mark
+                sample['e1_trigger'], sample['e1_start'], sample['e1s_start'], sample['e1e_start'], 
+                sample['e2_trigger'], sample['e2_start'], sample['e2s_start'], sample['e2e_start']
             )
             batch_sen.append(prompt_data['prompt'])
             batch_mask_idx.append(prompt_data['mask_idx'])
@@ -387,8 +482,37 @@ def get_dataLoader(args, dataset, tokenizer, add_mark:str, collote_fn_type:str, 
             'labels': batch_label
         }
     
+    def collote_fn_longformer(batch_samples):
+        batch_sen, batch_mask_idx, batch_event_idx, batch_coref = [], [], [], []
+        for sample in batch_samples:
+            prompt_data = get_prompt(
+                sample['sent'], 
+                sample['e1_trigger'], sample['e1_start'], sample['e1s_start'], sample['e1e_start'], 
+                sample['e2_trigger'], sample['e2_start'], sample['e2s_start'], sample['e2e_start']
+            )
+            batch_sen.append(prompt_data['prompt'])
+            batch_mask_idx.append(prompt_data['mask_idx'])
+            batch_event_idx.append([
+                prompt_data['e1s_idx'], prompt_data['e1e_idx'], prompt_data['e2s_idx'], prompt_data['e2e_idx']
+            ])
+            batch_coref.append(sample['label'])
+        batch_inputs = tokenizer(
+            batch_sen, 
+            max_length=args.max_seq_length, 
+            padding=True, 
+            truncation=True, 
+            return_tensors="pt"
+        )
+        batch_label = [pos_id if coref == 1 else neg_id  for coref in batch_coref]
+        return {
+            'batch_inputs': batch_inputs, 
+            'batch_mask_idx': batch_mask_idx, 
+            'batch_event_idx': batch_event_idx, 
+            'labels': batch_label
+        }
+    
     if collote_fn_type == 'normal':
-        select_collote_fn = collote_fn
+        select_collote_fn = collote_fn_longformer if add_mark == 'longformer' else collote_fn
     
     return DataLoader(
         dataset, 
@@ -426,7 +550,7 @@ if __name__ == '__main__':
     tokenizer.add_special_tokens(special_tokens_dict)
     assert tokenizer.additional_special_tokens == special_start_end_tokens
 
-    # train_data = KBPCoref('../../data/train_filtered.json', add_mark='longformer', context_k=1, tokenizer=tokenizer, max_length=480)
+    # train_data = KBPCoref('../../data/train_filtered.json', add_mark='longformer', context_k=2, tokenizer=tokenizer, max_length=482)
     # print_data_statistic('../../data/train_filtered.json')
     # print(len(train_data))
     # labels = [train_data[s_idx]['label'] for s_idx in range(len(train_data))]
@@ -443,12 +567,13 @@ if __name__ == '__main__':
     print(len(train_small_data))
     labels = [train_small_data[s_idx]['label'] for s_idx in range(len(train_small_data))]
     print('Coref:', labels.count(1), 'non-Coref:', labels.count(0))
-    train_data = iter(train_small_data)
-    for _ in range(100):
-        print('='*30)
-        print(next(train_data))
+    print(train_small_data[0])
+    print('Testing dataset...')
+    for _ in tqdm(train_small_data):
+        pass
     
-    train_dataloader = get_dataLoader(args, train_small_data, tokenizer, add_mark='longformer', collote_fn_type='normal', prompt_type='pb_d', shuffle=True)
+    verbalizer = {'COREF_TOKEN': 'same', 'NONCOREF_TOKEN': 'different'}
+    train_dataloader = get_dataLoader(args, train_small_data, tokenizer, add_mark='longformer', collote_fn_type='normal', prompt_type='pb_d', verbalizer=verbalizer, shuffle=True)
     batch_data = next(iter(train_dataloader))
     batch_X, batch_y = batch_data['batch_inputs'], batch_data['labels']
     print('batch_X shape:', {k: v.shape for k, v in batch_X.items()})
@@ -456,3 +581,7 @@ if __name__ == '__main__':
     print(batch_X)
     print(batch_y)
     print(tokenizer.decode(batch_X['input_ids'][0]))
+    print('Testing dataloader...')
+    batch_datas = iter(train_dataloader)
+    for step in tqdm(range(len(train_dataloader))):
+        next(batch_datas)
