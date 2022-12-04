@@ -27,8 +27,9 @@ MODEL_CLASSES = {
     'longformer': LongformerForPrompt
 }
 PROMPT_LENGTH = {
-    'pb_d': 30,    # prompt_base + document
-    'k_pb_d': 60   # knowledge + prompt_base + document
+    'pmb_d': 40, 'k_pmb_d': 70, # manual prompt
+    'pmq_d': 40, 'k_pmq_d': 70, # manual question-style prompt
+    'pb_d': 40, 'k_pb_d': 70    # learnable prompt
 }
 CONTEXT_K = 2
 
