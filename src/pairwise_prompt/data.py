@@ -27,7 +27,7 @@ def create_new_event_sent(
     sent1_idx:int, e1_sent_start:int, e1_trigger:str, 
     sent2_idx:int, e2_sent_start:int, e2_trigger:str, 
     sents:list, sents_lens:list, 
-    add_mark:str, context_k:int, max_length:int
+    add_mark:str, context_k:int, max_length:int, tokenizer
     ):
 
     '''
@@ -49,10 +49,10 @@ def create_new_event_sent(
     }
     '''
 
-    context_before =  ' '.join([sent['text'] for sent in sents[sent1_idx - context_k if sent1_idx >= context_k else 0 : sent1_idx]]).strip()
-    context_before_length = sum([sent_len for sent_len in sents_lens[sent1_idx - context_k if sent1_idx >= context_k else 0 : sent1_idx]])
-    context_next = ' '.join([sent['text'] for sent in sents[sent2_idx + 1 : sent2_idx + context_k + 1 if sent2_idx + context_k < len(sents) else len(sents)]]).strip()
-    context_next_length = sum([sent_len for sent_len in sents_lens[sent2_idx + 1 : sent2_idx + context_k + 1 if sent2_idx + context_k < len(sents) else len(sents)]])
+    context_before_list =  [sent['text'] for sent in sents[sent1_idx - context_k if sent1_idx >= context_k else 0 : sent1_idx]]
+    context_before_lengths = [sent_len for sent_len in sents_lens[sent1_idx - context_k if sent1_idx >= context_k else 0 : sent1_idx]]
+    context_next_list = [sent['text'] for sent in sents[sent2_idx + 1 : sent2_idx + context_k + 1 if sent2_idx + context_k < len(sents) else len(sents)]]
+    context_next_lengths = [sent_len for sent_len in sents_lens[sent2_idx + 1 : sent2_idx + context_k + 1 if sent2_idx + context_k < len(sents) else len(sents)]]
 
     e1s, e1e, e2s, e2e = ( # bert
         '[EVENT1_START]', '[EVENT1_END]', '[EVENT2_START]', '[EVENT2_END]'
@@ -63,9 +63,23 @@ def create_new_event_sent(
     if sent1_idx == sent2_idx: # two events in the same sentence
         assert e1_sent_start < e2_sent_start
         sent_text = sents[sent1_idx]['text']
+        total_length = sents_lens[sent1_idx] + 8
         before, middle, next = sent_text[:e1_sent_start], sent_text[e1_sent_start + len(e1_trigger):e2_sent_start], sent_text[e2_sent_start + len(e2_trigger):]
-        new_sent_before, new_sent_middle, new_sent_next = f'{context_before} {before}{e1s}'.strip(), f'{e1e}{middle}{e2s}', f'{e2e}{next} {context_next}'.strip()
+        new_sent_before, new_sent_middle, new_sent_next = f'{before}{e1s}', f'{e1e}{middle}{e2s}', f'{e2e}{next}'
+        for before_sen, sen_len in zip(context_before_list[-1::-1], context_before_lengths[-1::-1]):
+            if total_length + sen_len > max_length:
+                break
+            else:
+                total_length += sen_len
+                new_sent_before = before_sen + ' ' + new_sent_before
+        for next_sen, sen_len in zip(context_next_list[-1::-1], context_next_lengths[-1::-1]):
+            if total_length + sen_len > max_length:
+                break
+            else:
+                total_length += sen_len
+                new_sent_next += ' ' + next_sen
         new_sent = f'{new_sent_before}{e1_trigger}{new_sent_middle}{e2_trigger}{new_sent_next}'
+        
         e1_new_sent_start = len(new_sent_before)
         e1s_new_sent_start = e1_new_sent_start - len(e1s)
         e1e_new_sent_start = e1_new_sent_start + len(e1_trigger)
@@ -91,22 +105,40 @@ def create_new_event_sent(
             'e2e_sent_start': e2e_new_sent_start
         }
     else: # events in different sentence
-        # new sentence of event 1
         before_1, next_1 = sents[sent1_idx]['text'][:e1_sent_start], sents[sent1_idx]['text'][e1_sent_start + len(e1_trigger):]
-        new_sent1_before, new_sent1_next = f'{context_before} {before_1}{e1s}'.strip(), f'{e1e}{next_1}'
+        before_2, next_2 = sents[sent2_idx]['text'][:e2_sent_start], sents[sent2_idx]['text'][e2_sent_start + len(e2_trigger):]
+        total_length = sents_lens[sent1_idx] + sents_lens[sent2_idx] + 8
+        if total_length > max_length:
+            span_length = (max_length - 80) // 4
+            before_1 = ' '.join([c for c in before_1.split(' ') if c != ''][-span_length:]).strip()
+            next_1 = ' '.join([c for c in next_1.split(' ') if c != ''][:span_length]).strip()
+            before_2 = ' '.join([c for c in before_2.split(' ') if c != ''][-span_length:]).strip()
+            next_2 = ' '.join([c for c in next_2.split(' ') if c != ''][:span_length]).strip()
+            total_length = len(tokenizer(f'{before_1} {e1_trigger} {next_1} {before_2} {e2_trigger} {next_2}').tokens()) + 8
+        new_sent1_before, new_sent1_next = f'{before_1}{e1s}', f'{e1e}{next_1}'
+        new_sent2_before, new_sent2_next = f'{before_2}{e2s}', f'{e2e}{next_2}'
+        for before_sen, sen_len in zip(context_before_list[-1::-1], context_before_lengths[-1::-1]):
+            if total_length + sen_len > max_length:
+                break
+            else:
+                total_length += sen_len
+                new_sent1_before = before_sen + ' ' + new_sent1_before
+        for next_sen, sen_len in zip(context_next_list[-1::-1], context_next_lengths[-1::-1]):
+            if total_length + sen_len > max_length:
+                break
+            else:
+                total_length += sen_len
+                new_sent2_next += ' ' + next_sen
         new_sent1 = f'{new_sent1_before}{e1_trigger}{new_sent1_next}'
+        new_sent2 = f'{new_sent2_before}{e2_trigger}{new_sent2_next}'
+        
         e1_new_sent_start = len(new_sent1_before)
         e1s_new_sent_start = e1_new_sent_start - len(e1s)
         e1e_new_sent_start = e1_new_sent_start + len(e1_trigger)
-        # new sentence of event 2
-        before_2, next_2 = sents[sent2_idx]['text'][:e2_sent_start], sents[sent2_idx]['text'][e2_sent_start + len(e2_trigger):]
-        new_sent2_before, new_sent2_next = f'{before_2}{e2s}'.strip(), f'{e2e}{next_2} {context_next}'.strip()
-        new_sent2 = f'{new_sent2_before}{e2_trigger}{new_sent2_next}'
         e2_new_sent_start = len(new_sent2_before)
         e2s_new_sent_start = e2_new_sent_start - len(e2s)
         e2e_new_sent_start = e2_new_sent_start + len(e2_trigger)
         # add sentences between new_sent1 and new_sent2
-        total_length = context_before_length + sents_lens[sent1_idx] + sents_lens[sent2_idx] + context_next_length + 8 # plus 8 special tokens
         p, q = sent1_idx + 1, sent2_idx - 1
         while p <= q:
             if p == q:
@@ -200,7 +232,7 @@ class KBPCoref(Dataset):
                         new_event_sent = create_new_event_sent(
                             event_1['sent_idx'], event_1['sent_start'], event_1['trigger'], 
                             event_2['sent_idx'], event_2['sent_start'], event_2['trigger'], 
-                            sentences, sentences_lengths, add_mark, context_k, max_length
+                            sentences, sentences_lengths, add_mark, context_k, max_length, tokenizer
                         )
                         Data.append({
                             'id': sample['doc_id'], 
@@ -294,7 +326,7 @@ class KBPCorefTiny(Dataset):
                                 new_event_sent = create_new_event_sent(
                                     event_1['sent_idx'], event_1['sent_start'], event_1['trigger'], 
                                     event_2['sent_idx'], event_2['sent_start'], event_2['trigger'], 
-                                    sentences, sentences_lengths, add_mark, context_k, max_length
+                                    sentences, sentences_lengths, add_mark, context_k, max_length, tokenizer
                                 )
                                 Data.append({
                                     'id': sample['doc_id'], 
@@ -330,7 +362,7 @@ class KBPCorefTiny(Dataset):
                                 new_event_sent = create_new_event_sent(
                                     event_1['sent_idx'], event_1['sent_start'], event_1['trigger'], 
                                     event_2['sent_idx'], event_2['sent_start'], event_2['trigger'], 
-                                    sentences, sentences_lengths, add_mark, context_k, max_length
+                                    sentences, sentences_lengths, add_mark, context_k, max_length, tokenizer
                                 )
                                 Data.append({
                                     'id': sample['doc_id'], 
@@ -358,7 +390,7 @@ class KBPCorefTiny(Dataset):
                             new_event_sent = create_new_event_sent(
                                 event_1['sent_idx'], event_1['sent_start'], event_1['trigger'], 
                                 event_2['sent_idx'], event_2['sent_start'], event_2['trigger'], 
-                                sentences, sentences_lengths, add_mark, context_k, max_length
+                                sentences, sentences_lengths, add_mark, context_k, max_length, tokenizer
                             )
                             Data.append({
                                 'id': sample['doc_id'], 
@@ -540,7 +572,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     args = parser.parse_args()
     args.batch_size = 4
-    args.max_seq_length = 4096
+    args.max_seq_length = 512
     args.model_type = 'longformer'
     args.model_checkpoint = '../../PT_MODELS/allenai/longformer-large-4096'
 
@@ -561,7 +593,7 @@ if __name__ == '__main__':
 
     train_small_data = KBPCorefTiny(
         '../../data/train_filtered.json', '../../data/train_filtered_with_cos.json', 
-        pos_top_k=0, neg_top_k=10, add_mark='longformer', context_k=2, tokenizer=tokenizer, max_length=482
+        pos_top_k=0, neg_top_k=10, add_mark='longformer', context_k=2, tokenizer=tokenizer, max_length=512-40
     )
     print_data_statistic('../../data/train_filtered_with_cos.json')
     print(len(train_small_data))
