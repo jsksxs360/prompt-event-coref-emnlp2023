@@ -232,7 +232,7 @@ class KBPCoref(Dataset):
                         new_event_sent = create_new_event_sent(
                             event_1['sent_idx'], event_1['sent_start'], event_1['trigger'], 
                             event_2['sent_idx'], event_2['sent_start'], event_2['trigger'], 
-                            sentences, sentences_lengths, add_mark, context_k, max_length, tokenizer
+                            sentences, sentences_lengths, add_mark, context_k, max_length, self.tokenizer
                         )
                         Data.append({
                             'id': sample['doc_id'], 
@@ -326,7 +326,7 @@ class KBPCorefTiny(Dataset):
                                 new_event_sent = create_new_event_sent(
                                     event_1['sent_idx'], event_1['sent_start'], event_1['trigger'], 
                                     event_2['sent_idx'], event_2['sent_start'], event_2['trigger'], 
-                                    sentences, sentences_lengths, add_mark, context_k, max_length, tokenizer
+                                    sentences, sentences_lengths, add_mark, context_k, max_length, self.tokenizer
                                 )
                                 Data.append({
                                     'id': sample['doc_id'], 
@@ -362,7 +362,7 @@ class KBPCorefTiny(Dataset):
                                 new_event_sent = create_new_event_sent(
                                     event_1['sent_idx'], event_1['sent_start'], event_1['trigger'], 
                                     event_2['sent_idx'], event_2['sent_start'], event_2['trigger'], 
-                                    sentences, sentences_lengths, add_mark, context_k, max_length, tokenizer
+                                    sentences, sentences_lengths, add_mark, context_k, max_length, self.tokenizer
                                 )
                                 Data.append({
                                     'id': sample['doc_id'], 
@@ -390,7 +390,7 @@ class KBPCorefTiny(Dataset):
                             new_event_sent = create_new_event_sent(
                                 event_1['sent_idx'], event_1['sent_start'], event_1['trigger'], 
                                 event_2['sent_idx'], event_2['sent_start'], event_2['trigger'], 
-                                sentences, sentences_lengths, add_mark, context_k, max_length, tokenizer
+                                sentences, sentences_lengths, add_mark, context_k, max_length, self.tokenizer
                             )
                             Data.append({
                                 'id': sample['doc_id'], 

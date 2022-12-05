@@ -128,7 +128,7 @@ def train(args, train_dataset, dev_dataset, model, tokenizer, add_mark, collote_
     for epoch in range(args.num_train_epochs):
         print(f"Epoch {epoch+1}/{args.num_train_epochs}\n" + "-" * 30)
         total_loss = train_loop(args, train_dataloader, model, optimizer, lr_scheduler, epoch, total_loss)
-        metrics = test_loop(args, dev_dataloader, dev_dataset, model, tokenizer)
+        metrics = test_loop(args, dev_dataloader, dev_dataset, model, tokenizer, verbalizer)
         dev_p, dev_r, dev_f1 = metrics['1']['precision'], metrics['1']['recall'], metrics['1']['f1-score']
         logger.info(f'Dev: P - {(100*dev_p):0.4f} R - {(100*dev_r):0.4f} F1 - {(100*dev_f1):0.4f}')
         if dev_f1 > best_f1:
