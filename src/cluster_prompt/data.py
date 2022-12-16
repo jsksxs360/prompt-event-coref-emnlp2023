@@ -133,7 +133,7 @@ class KBPCorefTiny(Dataset):
         - data_file: source train data file
         - data_file_with_cos: train data file with event similarities
         '''
-        assert pos_r > 0. and neg_r > 0. and max_length > 0
+        assert 0. < pos_r <= 1. and neg_r > 0. and max_length > 0
         self.tokenizer = tokenizer
         self.fake_cluster_k = fake_cluster_k
         self.pos_r = pos_r
@@ -274,6 +274,92 @@ class KBPCorefTiny(Dataset):
     def __getitem__(self, idx):
         return self.data[idx]
 
+def get_dataLoader(args, dataset, tokenizer, collote_fn_type:str, prompt_type:str, verbalizer:dict, batch_size:int=None, shuffle:bool=False):
+
+    assert collote_fn_type in ['normal']
+    assert prompt_type in [
+        'pmb_d', 'k_pmb_d',  # prompt_manual_base + document (knowledge)
+        'pmq_d', 'k_pmq_d',  # prompt_manual_question + document (knowledge)
+        'pb_d', 'k_pb_d'    # prompt_base + document (knowledge)
+    ]
+    assert tokenizer.additional_special_tokens == SPECIAL_TOKENS
+    
+    e1s_token, e1e_token, e2s_token, e2e_token = '<event1_start>', '<event1_end>', '<event2_start>', '<event2_end>'
+    l_token1, l_token2, l_token3, l_token4, l_token5, l_token6 = '<l_token1>', '<l_token2>', '<l_token3>', '<l_token4>', '<l_token5>', '<l_token6>'
+    mask_token = '<mask>'
+
+    pos_id = tokenizer.convert_tokens_to_ids(verbalizer['COREF_TOKEN'])
+    neg_id = tokenizer.convert_tokens_to_ids(verbalizer['NONCOREF_TOKEN'])
+
+    def get_prompt(source_sent, e1_trigger, e2_trigger, event_s_e_offset):
+        knowledge = 'Events that correspond to the same event usually have related trigger words (predicates) and compatible entities (participants, time, location). '
+        if 'pmb_d' in prompt_type: # manual prompt
+            prompt = f'In this document, the {e1s_token} {e1_trigger} {e1e_token} event and the {e2s_token} {e2_trigger} {e2e_token} event refer to {mask_token} event. '
+            if prompt_type == 'k_pmb_d': 
+                prompt = knowledge + prompt
+        elif 'pmq_d' in prompt_type: # manual question-style prompt
+            prompt = f'In this document, the {e1s_token} {e1_trigger} {e1e_token} event and the {e2s_token} {e2_trigger} {e2e_token} event refer to the same event? {mask_token}. '
+            if prompt_type == 'k_pmq_d':
+                prompt = knowledge + prompt
+        elif 'pb_d' in prompt_type: # learnable prompt
+            prompt = f'In this document, {l_token1} {e1s_token} {e1_trigger} {e1e_token} {l_token2} {l_token3} {e2s_token} {e2_trigger} {e2e_token} {l_token4} {l_token5} {mask_token} {l_token6}. '
+            if prompt_type == 'k_pb_d': 
+                prompt = knowledge + prompt
+        
+        event_s_e_offset = [[e_s + len(prompt), e_e + len(prompt)] for e_s, e_e in event_s_e_offset]
+        prompt += source_sent
+        for e_s, e_e in event_s_e_offset: # check offset
+            assert prompt[e_s:e_s + len(e1s_token)] == e1s_token or prompt[e_s:e_s + len(e2s_token)] == e2s_token
+            assert prompt[e_e:e_e + len(e1e_token)] == e1e_token or prompt[e_e:e_e + len(e2e_token)] == e2e_token
+        # convert char offsets to token idxs
+        encoding = tokenizer(prompt, max_length=args.max_seq_length, truncation=True)
+        mask_idx = encoding.char_to_token(prompt.find(mask_token))
+        assert mask_idx is not None
+        event_s_e_idxs = []
+        for e_s, e_e in event_s_e_offset:
+            e_s_idx, e_e_idx = encoding.char_to_token(e_s), encoding.char_to_token(e_e)
+            assert e_s_idx is not None and e_e_idx is not None
+            event_s_e_idxs.append([e_s_idx, e_e_idx])
+        
+        return {
+            'prompt': prompt, 
+            'mask_idx': mask_idx, 
+            'event_idx': event_s_e_idxs
+        }
+    
+    def collote_fn(batch_samples):
+        batch_sen, batch_mask_idx, batch_event_idx, batch_coref = [], [], [], []
+        for sample in batch_samples:
+            prompt_data = get_prompt(sample['sent'], sample['cluster1_trigger'], sample['cluster2_trigger'], sample['event_s_e_offset'])
+            batch_sen.append(prompt_data['prompt'])
+            batch_mask_idx.append(prompt_data['mask_idx'])
+            batch_event_idx.append(prompt_data['event_idx'])
+            batch_coref.append(sample['label'])
+        batch_inputs = tokenizer(
+            batch_sen, 
+            max_length=args.max_seq_length, 
+            padding=True, 
+            truncation=True, 
+            return_tensors="pt"
+        )
+        batch_label = [pos_id if coref == 1 else neg_id  for coref in batch_coref]
+        return {
+            'batch_inputs': batch_inputs, 
+            'batch_mask_idx': batch_mask_idx, 
+            'batch_event_idx': batch_event_idx, 
+            'labels': batch_label
+        }
+    
+    if collote_fn_type == 'normal':
+        select_collote_fn = collote_fn
+    
+    return DataLoader(
+        dataset, 
+        batch_size=(batch_size if batch_size else args.batch_size), 
+        shuffle=shuffle, 
+        collate_fn=select_collote_fn
+    )
+
 if __name__ == '__main__':
 
     def print_data_statistic(data_file):
@@ -293,7 +379,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     args = parser.parse_args()
     args.batch_size = 4
-    args.max_seq_length = 1024-40
+    args.max_seq_length = 512
     args.model_type = 'longformer'
     args.model_checkpoint = '../../PT_MODELS/allenai/longformer-large-4096'
 
@@ -304,7 +390,7 @@ if __name__ == '__main__':
 
     train_small_data = KBPCorefTiny(
         '../../data/train_filtered.json', '../../data/train_filtered_with_cos.json', 
-        pos_r=1., neg_r=1., tokenizer=tokenizer, max_length=512-40
+        pos_r=1., neg_r=1.5, tokenizer=tokenizer, max_length=512-40
     )
     print_data_statistic('../../data/train_filtered_with_cos.json')
     print(len(train_small_data))
@@ -315,3 +401,16 @@ if __name__ == '__main__':
     for _ in tqdm(train_small_data):
         pass
 
+    verbalizer = {'COREF_TOKEN': 'same', 'NONCOREF_TOKEN': 'different'}
+    train_dataloader = get_dataLoader(args, train_small_data, tokenizer, collote_fn_type='normal', prompt_type='pb_d', verbalizer=verbalizer, shuffle=True)
+    batch_data = next(iter(train_dataloader))
+    batch_X, batch_y = batch_data['batch_inputs'], batch_data['labels']
+    print('batch_X shape:', {k: v.shape for k, v in batch_X.items()})
+    print('batch_y shape:', len(batch_y))
+    print(batch_X)
+    print(batch_y)
+    print(tokenizer.decode(batch_X['input_ids'][0]))
+    print('Testing dataloader...')
+    batch_datas = iter(train_dataloader)
+    for step in tqdm(range(len(train_dataloader))):
+        next(batch_datas)
