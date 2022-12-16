@@ -133,7 +133,7 @@ def test(args, test_dataset, model, tokenizer, save_weights:list):
     logger.info('***** Running testing *****')
     for save_weight in save_weights:
         logger.info(f'loading weights from {save_weight}...')
-        model.load_state_dict(torch.load(os.path.join(args.output_dir, save_weight)))
+        model.load_state_dict(torch.load(os.path.join(args.output_dir, save_weight)), strict=False)
         metrics = test_loop(args, test_dataloader, model)
         dev_p, dev_r, dev_f1 = metrics['1']['precision'], metrics['1']['recall'], metrics['1']['f1-score']
         logger.info(f'Dev: P - {(100*dev_p):0.4f} R - {(100*dev_r):0.4f} F1 - {(100*dev_f1):0.4f}')
@@ -229,7 +229,7 @@ if __name__ == '__main__':
     if args.do_predict:
         best_save_weight = 'epoch_20_dev_f1_73.3697_weights.bin'
         logger.info(f'loading weights from {best_save_weight}...')
-        model.load_state_dict(torch.load(os.path.join(args.output_dir, best_save_weight)))
+        model.load_state_dict(torch.load(os.path.join(args.output_dir, best_save_weight)), strict=False)
         logger.info(f'calculating event cosine similarity of {best_save_weight}...')
         results = []
         model.eval()
