@@ -7,6 +7,12 @@ from collections import Counter, defaultdict
 MAX_LOOP_NUM = 1000
 RANDOM_SEED = 42
 
+# prompt
+PROMPT_TYPE = [
+    'pmb_d', 'k_pmb_d',  # prompt_manual_base + document (knowledge)
+    'pmq_d', 'k_pmq_d',  # prompt_manual_question + document (knowledge)
+    'pb_d', 'k_pb_d'    # prompt_base + document (knowledge)
+]
 # special tokens
 BERT_SPECIAL_TOKENS= [
     '[EVENT1_START]', '[EVENT1_END]', '[EVENT2_START]', '[EVENT2_END]', 
@@ -295,11 +301,7 @@ class KBPCorefTiny(Dataset):
 def get_dataLoader(args, dataset, tokenizer, add_mark:str, collote_fn_type:str, prompt_type:str, verbalizer:dict, batch_size:int=None, shuffle:bool=False):
 
     assert collote_fn_type in ['normal']
-    assert prompt_type in [
-        'pmb_d', 'k_pmb_d',  # prompt_manual_base + document (knowledge)
-        'pmq_d', 'k_pmq_d',  # prompt_manual_question + document (knowledge)
-        'pb_d', 'k_pb_d'    # prompt_base + document (knowledge)
-    ]
+    assert prompt_type in PROMPT_TYPE
     
     if add_mark == 'bert':
         special_start_end_tokens = BERT_SPECIAL_TOKENS

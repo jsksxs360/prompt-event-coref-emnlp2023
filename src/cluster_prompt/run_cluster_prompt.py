@@ -10,10 +10,10 @@ from sklearn.metrics import classification_report
 import sys
 sys.path.append('../../')
 from src.tools import seed_everything, NpEncoder
-from src.pairwise_prompt.arg import parse_args
-from src.pairwise_prompt.data import KBPCoref, KBPCorefTiny, get_dataLoader
-from src.pairwise_prompt.data import BERT_SPECIAL_TOKENS, ROBERTA_SPECIAL_TOKENS
-from src.pairwise_prompt.modeling import BertForPrompt, RobertaForPrompt, LongformerForPrompt
+from src.cluster_prompt.arg import parse_args
+from src.cluster_prompt.data import KBPCorefTiny, get_dataLoader
+from src.cluster_prompt.data import BERT_SPECIAL_TOKENS, ROBERTA_SPECIAL_TOKENS, PROMPT_TYPE
+from src.cluster_prompt.modeling import BertForPrompt, RobertaForPrompt, LongformerForPrompt
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
                     datefmt='%Y/%m/%d %H:%M:%S',
@@ -30,7 +30,6 @@ PROMPT_LENGTH = {
     'pmq_d': 40, 'k_pmq_d': 70, # manual question-style prompt
     'pb_d': 40, 'k_pb_d': 70    # learnable prompt
 }
-CONTEXT_K = 2
 
 def to_device(args, batch_data):
     new_batch_data = {}
@@ -118,7 +117,7 @@ def train(args, train_dataset, dev_dataset, model, tokenizer, add_mark, collote_
     logger.info(f"Total optimization steps - {t_total}")
     with open(os.path.join(args.output_dir, 'args.txt'), 'wt') as f:
         f.write(str(args))
-
+    
     total_loss = 0.
     best_f1 = 0.
     pos_id = tokenizer.convert_tokens_to_ids(verbalizer['COREF_TOKEN'])
@@ -179,7 +178,8 @@ if __name__ == '__main__':
     tokenizer.add_special_tokens(special_tokens_dict)
     assert tokenizer.additional_special_tokens == special_start_end_tokens
     model.resize_token_embeddings(len(tokenizer))
-    
+
+    assert args.prompt_type in PROMPT_TYPE
     if 'q' in args.prompt_type: # question style
         verbalizer = {'COREF_TOKEN': 'yes', 'NONCOREF_TOKEN': 'no'}
     else:
@@ -187,29 +187,21 @@ if __name__ == '__main__':
     logger.info(f'verbalizer: {verbalizer} ...')
     # Training
     if args.do_train:
-        if args.train_data_type == 'normal':
-            train_dataset = KBPCoref(
-                args.train_file, 
-                add_mark=args.model_type, 
-                context_k=CONTEXT_K, 
-                tokenizer=tokenizer, 
-                max_length=args.max_seq_length - PROMPT_LENGTH[args.prompt_type]
-            )
-        else:
-            train_dataset = KBPCorefTiny(
-                args.train_file, 
-                args.train_file_with_cos, 
-                pos_top_k=args.pos_top_k, 
-                neg_top_k=args.neg_top_k, 
-                add_mark=args.model_type, 
-                context_k=CONTEXT_K, 
-                tokenizer=tokenizer, 
-                max_length=args.max_seq_length - PROMPT_LENGTH[args.prompt_type]
-            )
-        dev_dataset = KBPCoref(
+        train_dataset = KBPCorefTiny(
+            args.train_file, 
+            args.train_file_with_cos, 
+            pos_r=args.pos_r, 
+            neg_r=args.neg_r, 
+            add_mark=args.model_type,  
+            tokenizer=tokenizer, 
+            max_length=args.max_seq_length - PROMPT_LENGTH[args.prompt_type]
+        )
+        dev_dataset = KBPCorefTiny(
             args.dev_file, 
-            add_mark=args.model_type, 
-            context_k=CONTEXT_K, 
+            args.dev_file_with_cos, 
+            pos_r=args.pos_r, 
+            neg_r=args.neg_r, 
+            add_mark=args.model_type,  
             tokenizer=tokenizer, 
             max_length=args.max_seq_length - PROMPT_LENGTH[args.prompt_type]
         )
@@ -219,10 +211,12 @@ if __name__ == '__main__':
     # Testing
     save_weights = [file for file in os.listdir(args.output_dir) if file.endswith('.bin')]
     if args.do_test:
-        test_dataset = KBPCoref(
+        test_dataset = KBPCorefTiny(
             args.test_file, 
+            args.test_file_with_cos, 
+            pos_r=args.pos_r, 
+            neg_r=args.neg_r, 
             add_mark=args.model_type, 
-            context_k=CONTEXT_K, 
             tokenizer=tokenizer, 
             max_length=args.max_seq_length - PROMPT_LENGTH[args.prompt_type]
         )

@@ -10,6 +10,8 @@ def parse_args():
     parser.add_argument("--dev_file", default=None, type=str, required=True, help="The input evaluation file.")
     parser.add_argument("--test_file", default=None, type=str, required=True, help="The input testing file.")
     parser.add_argument("--train_file_with_cos", default=None, type=str, required=False, help="Input training file with similarities.")
+    parser.add_argument("--dev_file_with_cos", default=None, type=str, required=False, help="Input evaluation file with similarities.")
+    parser.add_argument("--test_file_with_cos", default=None, type=str, required=False, help="Input testing file with similarities.")
     # tiny dataset
     parser.add_argument("--pos_r", default="1.", type=float)
     parser.add_argument("--neg_r", default="1.", type=float)
