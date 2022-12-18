@@ -5,11 +5,20 @@ import json
 from collections import Counter, defaultdict
 
 MAX_LOOP_NUM = 1000
-SPECIAL_TOKENS = [
+RANDOM_SEED = 42
+
+# special tokens
+BERT_SPECIAL_TOKENS= [
+    '[EVENT1_START]', '[EVENT1_END]', '[EVENT2_START]', '[EVENT2_END]', 
+    '[L_TOKEN1]', '[L_TOKEN2]', '[L_TOKEN3]', '[L_TOKEN4]', '[L_TOKEN5]', '[L_TOKEN6]'
+]
+ROBERTA_SPECIAL_TOKENS = [
     '<event1_start>', '<event1_end>', '<event2_start>', '<event2_end>', 
     '<l_token1>', '<l_token2>', '<l_token3>', '<l_token4>', '<l_token5>', '<l_token6>'
 ]
-np.random.seed(42)
+ADD_MARK_TYPE = ['bert', 'roberta', 'longformer']
+
+np.random.seed(RANDOM_SEED)
 
 def get_sen_with_events(
     sentence:str,
@@ -128,17 +137,26 @@ def create_fake_cluster(cluster_events, simi_dict, events_dict, fake_cluster_k):
 
 class KBPCorefTiny(Dataset):
     
-    def __init__(self, data_file:str, data_file_with_cos:str, pos_r:float, neg_r:float, tokenizer, max_length:int, fake_cluster_k=2):
+    def __init__(self, data_file:str, data_file_with_cos:str, pos_r:float, neg_r:float, add_mark:str, tokenizer, max_length:int, fake_cluster_k=2):
         '''
         - data_file: source train data file
         - data_file_with_cos: train data file with event similarities
         '''
         assert 0. < pos_r <= 1. and neg_r > 0. and max_length > 0
+        assert add_mark in ADD_MARK_TYPE
+        
+
         self.tokenizer = tokenizer
         self.fake_cluster_k = fake_cluster_k
         self.pos_r = pos_r
         self.neg_r = neg_r
+        self.e1s, self.e1e, self.e2s, self.e2e = ( # bert
+            '[EVENT1_START]', '[EVENT1_END]', '[EVENT2_START]', '[EVENT2_END]'
+        ) if add_mark=='bert' else ( # roberta & longformer
+            '<event1_start>', '<event1_end>', '<event2_start>', '<event2_end>'
+        )
         self.max_length = max_length
+        
         self.data = self.load_data(data_file, data_file_with_cos)
 
     def _get_my_sample(self, cluster1_events, cluster2_events, sentences, sentences_lengths, max_length):
@@ -179,8 +197,8 @@ class KBPCorefTiny(Dataset):
         for _, s_e in sentence_event:
             new_sen, new_event_offsets = get_sen_with_events(
                 s_e['text'], 
-                s_e['cluster1_events'], '<event1_start>', '<event1_end>', 
-                s_e['cluster2_events'], '<event2_start>', '<event2_end>'
+                s_e['cluster1_events'], self.e1s, self.e1e, 
+                s_e['cluster2_events'], self.e2s, self.e2e
             )
             event_s_e_offsets += [[s+len(document), e+len(document)] for s, e in new_event_offsets]
             document += new_sen + ' '
@@ -274,7 +292,7 @@ class KBPCorefTiny(Dataset):
     def __getitem__(self, idx):
         return self.data[idx]
 
-def get_dataLoader(args, dataset, tokenizer, collote_fn_type:str, prompt_type:str, verbalizer:dict, batch_size:int=None, shuffle:bool=False):
+def get_dataLoader(args, dataset, tokenizer, add_mark:str, collote_fn_type:str, prompt_type:str, verbalizer:dict, batch_size:int=None, shuffle:bool=False):
 
     assert collote_fn_type in ['normal']
     assert prompt_type in [
@@ -282,11 +300,18 @@ def get_dataLoader(args, dataset, tokenizer, collote_fn_type:str, prompt_type:st
         'pmq_d', 'k_pmq_d',  # prompt_manual_question + document (knowledge)
         'pb_d', 'k_pb_d'    # prompt_base + document (knowledge)
     ]
-    assert tokenizer.additional_special_tokens == SPECIAL_TOKENS
     
-    e1s_token, e1e_token, e2s_token, e2e_token = '<event1_start>', '<event1_end>', '<event2_start>', '<event2_end>'
-    l_token1, l_token2, l_token3, l_token4, l_token5, l_token6 = '<l_token1>', '<l_token2>', '<l_token3>', '<l_token4>', '<l_token5>', '<l_token6>'
-    mask_token = '<mask>'
+    if add_mark == 'bert':
+        special_start_end_tokens = BERT_SPECIAL_TOKENS
+        e1s_token, e1e_token, e2s_token, e2e_token = '[EVENT1_START]', '[EVENT1_END]', '[EVENT2_START]', '[EVENT2_END]'
+        l_token1, l_token2, l_token3, l_token4, l_token5, l_token6 = '[L_TOKEN1]', '[L_TOKEN2]', '[L_TOKEN3]', '[L_TOKEN4]', '[L_TOKEN5]', '[L_TOKEN6]'
+        mask_token = '[MASK]'
+    else:
+        special_start_end_tokens = ROBERTA_SPECIAL_TOKENS
+        e1s_token, e1e_token, e2s_token, e2e_token = '<event1_start>', '<event1_end>', '<event2_start>', '<event2_end>'
+        l_token1, l_token2, l_token3, l_token4, l_token5, l_token6 = '<l_token1>', '<l_token2>', '<l_token3>', '<l_token4>', '<l_token5>', '<l_token6>'
+        mask_token = '<mask>'
+    assert tokenizer.additional_special_tokens == special_start_end_tokens
 
     pos_id = tokenizer.convert_tokens_to_ids(verbalizer['COREF_TOKEN'])
     neg_id = tokenizer.convert_tokens_to_ids(verbalizer['NONCOREF_TOKEN'])
@@ -379,18 +404,19 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     args = parser.parse_args()
     args.batch_size = 4
-    args.max_seq_length = 512
+    args.max_seq_length = 1024
     args.model_type = 'longformer'
     args.model_checkpoint = '../../PT_MODELS/allenai/longformer-large-4096'
 
     tokenizer = AutoTokenizer.from_pretrained(args.model_checkpoint)
-    special_tokens_dict = {'additional_special_tokens': SPECIAL_TOKENS}
+    special_start_end_tokens = BERT_SPECIAL_TOKENS if args.model_type == 'bert' else  ROBERTA_SPECIAL_TOKENS
+    special_tokens_dict = {'additional_special_tokens': special_start_end_tokens}
     tokenizer.add_special_tokens(special_tokens_dict)
-    assert tokenizer.additional_special_tokens == SPECIAL_TOKENS
+    assert tokenizer.additional_special_tokens == special_start_end_tokens
 
     train_small_data = KBPCorefTiny(
         '../../data/train_filtered.json', '../../data/train_filtered_with_cos.json', 
-        pos_r=1., neg_r=1.5, tokenizer=tokenizer, max_length=512-40
+        pos_r=1., neg_r=1.5, add_mark=args.model_type, tokenizer=tokenizer, max_length=1024-40
     )
     print_data_statistic('../../data/train_filtered_with_cos.json')
     print(len(train_small_data))
@@ -402,7 +428,7 @@ if __name__ == '__main__':
         pass
 
     verbalizer = {'COREF_TOKEN': 'same', 'NONCOREF_TOKEN': 'different'}
-    train_dataloader = get_dataLoader(args, train_small_data, tokenizer, collote_fn_type='normal', prompt_type='pb_d', verbalizer=verbalizer, shuffle=True)
+    train_dataloader = get_dataLoader(args, train_small_data, tokenizer, add_mark=args.model_type, collote_fn_type='normal', prompt_type='pb_d', verbalizer=verbalizer, shuffle=True)
     batch_data = next(iter(train_dataloader))
     batch_X, batch_y = batch_data['batch_inputs'], batch_data['labels']
     print('batch_X shape:', {k: v.shape for k, v in batch_X.items()})
