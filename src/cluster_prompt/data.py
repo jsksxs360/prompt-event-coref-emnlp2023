@@ -26,29 +26,6 @@ ADD_MARK_TYPE = ['bert', 'roberta', 'longformer']
 
 np.random.seed(RANDOM_SEED)
 
-def get_sen_with_events(
-    sentence:str,
-    cluster1_events, c1_start_token:str, c1_end_token:str, 
-    cluster2_events, c2_start_token:str, c2_end_token:str
-    ):
-    all_events = []
-    all_events += [{'offset': event['sent_start'], 'trigger': event['trigger'], 'cluster': 1} for event in cluster1_events]
-    all_events += [{'offset': event['sent_start'], 'trigger': event['trigger'], 'cluster': 2} for event in cluster2_events]
-    all_events.sort(key=lambda x:x['offset'])
-    new_sen, start_p = '', 0
-    new_event_offsets = []
-    for event in all_events:
-        new_sen += sentence[start_p:event['offset']]
-        new_event_offsets.append([
-            len(new_sen), len(new_sen) + (len(c1_start_token) if event['cluster'] == 1 else len(c2_start_token)) + len(event['trigger'])
-        ])
-        new_sen += (c1_start_token + event['trigger'] + c1_end_token) if event['cluster'] == 1 else (c2_start_token + event['trigger'] + c2_end_token)
-        start_p = event['offset'] + len(event['trigger'])
-    new_sen += sentence[start_p:]
-    return new_sen, new_event_offsets
-
-get_all_events_in_cluster = lambda event_list, cluster: [event for event in event_list if event['event_id'] in cluster]
-
 def choose_sent_idxs(cluster1_events:list, cluster2_events:list, sent_lengths:list, max_approx_length:int) -> set:
     c1_sent_idxs, c2_sent_idxs = set([e['sent_idx'] for e in cluster1_events]), set([e['sent_idx'] for e in cluster2_events])
     c1_and_c2_sent_idxs = c1_sent_idxs & c2_sent_idxs
@@ -145,6 +122,8 @@ def create_fake_cluster(cluster_events, simi_dict, events_dict, fake_cluster_k):
             fake_cluster_ids.append(fake_cluster_id)
     return fake_clusters
 
+get_all_events_in_cluster = lambda event_list, cluster: [event for event in event_list if event['event_id'] in cluster]
+
 class KBPCorefTiny(Dataset):
     
     def __init__(self, data_file:str, data_file_with_cos:str, pos_r:float, neg_r:float, add_mark:str, tokenizer, max_length:int, fake_cluster_k=2):
@@ -169,6 +148,23 @@ class KBPCorefTiny(Dataset):
         
         self.data = self.load_data(data_file, data_file_with_cos)
 
+    def _get_sen_with_events(self, sentence:str, cluster1_events, cluster2_events):
+        all_events = []
+        all_events += [{'offset': event['sent_start'], 'trigger': event['trigger'], 'cluster': 1} for event in cluster1_events]
+        all_events += [{'offset': event['sent_start'], 'trigger': event['trigger'], 'cluster': 2} for event in cluster2_events]
+        all_events.sort(key=lambda x:x['offset'])
+        new_sen, start_p = '', 0
+        new_event_offsets = []
+        for event in all_events:
+            new_sen += sentence[start_p:event['offset']]
+            new_event_offsets.append([
+                len(new_sen), len(new_sen) + (len(self.e1s) if event['cluster'] == 1 else len(self.e2s)) + len(event['trigger'])
+            ])
+            new_sen += (self.e1s + event['trigger'] + self.e1e) if event['cluster'] == 1 else (self.e2s + event['trigger'] + self.e2e)
+            start_p = event['offset'] + len(event['trigger'])
+        new_sen += sentence[start_p:]
+        return new_sen, new_event_offsets
+    
     def _get_my_sample(self, cluster1_events, cluster2_events, sentences, sentences_lengths, max_length):
         # choose event sentences to control the total length
         chosen_sent_idxs = choose_sent_idxs(cluster1_events, cluster2_events, sentences_lengths, max_length)
@@ -205,11 +201,7 @@ class KBPCorefTiny(Dataset):
         sentence_event = sorted(sentence_event.items(), key=lambda x:x[0])
         document, event_s_e_offsets = '', []
         for _, s_e in sentence_event:
-            new_sen, new_event_offsets = get_sen_with_events(
-                s_e['text'], 
-                s_e['cluster1_events'], self.e1s, self.e1e, 
-                s_e['cluster2_events'], self.e2s, self.e2e
-            )
+            new_sen, new_event_offsets = self._get_sen_with_events(s_e['text'], s_e['cluster1_events'], s_e['cluster2_events'])
             event_s_e_offsets += [[s+len(document), e+len(document)] for s, e in new_event_offsets]
             document += new_sen + ' '
         
@@ -225,7 +217,7 @@ class KBPCorefTiny(Dataset):
     def load_data(self, data_file, data_file_with_cos):
         Data = []
         with open(data_file, 'rt', encoding='utf-8') as f, open(data_file_with_cos, 'rt', encoding='utf-8') as f_cos:
-            # coref cluster pairs (positive samples)
+            ##################### coref cluster pairs (positive samples) #####################
             num_file = sum([1 for _ in open(data_file, 'rt', encoding='utf-8')])
             for line in tqdm(f, total=num_file): 
                 sample = json.loads(line.strip())
@@ -248,14 +240,16 @@ class KBPCorefTiny(Dataset):
                                 continue
                             sampled_c1_indexs.append(c1_indexs)
                             c1_events = [event for idx, event in enumerate(cluster_events) if idx in c1_indexs]
-                            c2_events = [event for idx, event in enumerate(cluster_events) if idx not in c1_indexs]
+                            c2_size = np.random.randint(c1_size, cluster_size - c1_size + 1) # sample cluster 2
+                            c2_indexs = set(np.random.choice(list(set(range(cluster_size)) - c1_indexs), c2_size, replace=False))
+                            c2_events = [event for idx, event in enumerate(cluster_events) if idx in c2_indexs]
                             my_sample = self._get_my_sample(c1_events, c2_events, sentences, sentences_lengths, self.max_length)
                             if not my_sample:
                                 continue
                             my_sample['id'], my_sample['label'], my_sample['type'] = sample['doc_id'], 1, '1'
                             Data.append(my_sample)
                             sample_num += 1
-            # non-coref cluster pairs (negtive samples)
+            ##################### non-coref cluster pairs (negtive samples) #####################
             num_file = sum([1 for _ in open(data_file_with_cos, 'rt', encoding='utf-8')])
             for line in tqdm(f_cos, total=num_file): 
                 sample = json.loads(line.strip())
@@ -274,12 +268,16 @@ class KBPCorefTiny(Dataset):
                         for other_c_idx, other_cluster_events in enumerate(clusters): # other cluster
                             if sample_num >= cluster_size * self.neg_r or loop_num > MAX_LOOP_NUM:
                                 break
-                            if other_c_idx == c_idx or cluster_sizes[other_c_idx] < 2 or cluster_sizes[other_c_idx] < c1_size:
+                            other_cluster_size = cluster_sizes[other_c_idx]
+                            if other_c_idx == c_idx or other_cluster_size < 2 or other_cluster_size < c1_size:
                                 continue
                             loop_num += 1
-                            c1_indexs = np.random.choice(np.random.permutation(cluster_size), c1_size, replace=False) # random, random, random!
+                            c1_indexs = set(np.random.choice(np.random.permutation(cluster_size), c1_size, replace=False)) # random, random, random!
                             c1_events = [event for idx, event in enumerate(cluster_events) if idx in c1_indexs]
-                            my_sample = self._get_my_sample(c1_events, other_cluster_events, sentences, sentences_lengths, self.max_length)
+                            c2_size = np.random.randint(c1_size, other_cluster_size + 1)
+                            c2_indexs = set(np.random.choice(np.random.permutation(other_cluster_size), c2_size, replace=False))
+                            c2_events = [event for idx, event in enumerate(other_cluster_events) if idx in c2_indexs]
+                            my_sample = self._get_my_sample(c1_events, c2_events, sentences, sentences_lengths, self.max_length)
                             if not my_sample:
                                 continue
                             my_sample['id'], my_sample['label'], my_sample['type'] = sample['doc_id'], 0, '0-1'
@@ -295,7 +293,9 @@ class KBPCorefTiny(Dataset):
                                 continue
                             sampled_c1_indexs.append(c1_indexs)
                             c1_events = [event for idx, event in enumerate(cluster_events) if idx in c1_indexs]
-                            c2_events = [event for idx, event in enumerate(cluster_events) if idx not in c1_indexs]
+                            c2_size = np.random.randint(c1_size, cluster_size - c1_size + 1) # sample cluster 2
+                            c2_indexs = set(np.random.choice(list(set(range(cluster_size)) - c1_indexs), c2_size, replace=False))
+                            c2_events = [event for idx, event in enumerate(cluster_events) if idx in c2_indexs]
                             fake_clusters = create_fake_cluster(c2_events, event_simi_dict, events_dict, self.fake_cluster_k)
                             for fake_c2_events in fake_clusters:
                                 my_sample = self._get_my_sample(c1_events, fake_c2_events, sentences, sentences_lengths, self.max_length)
