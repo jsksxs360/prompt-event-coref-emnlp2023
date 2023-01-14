@@ -1,8 +1,8 @@
-export OUTPUT_DIR=./longformer_pb_d_results/
+export OUTPUT_DIR=./longformer_sb_d_results/
 
 python3 run_prompt.py \
     --output_dir=$OUTPUT_DIR \
-    --prompt_type=pb_d \
+    --prompt_type=sb_d \
     --model_type=longformer \
     --model_checkpoint=../../PT_MODELS/allenai/longformer-large-4096/ \
     --train_file=../../data/train_filtered.json \
