@@ -14,7 +14,7 @@ from src.tools import seed_everything, NpEncoder
 from src.pairwise_prompt.arg import parse_args
 from src.pairwise_prompt.data import KBPCoref, KBPCorefTiny, get_dataLoader
 from src.pairwise_prompt.data import BERT_SPECIAL_TOKENS, ROBERTA_SPECIAL_TOKENS
-from src.pairwise_prompt.utils import create_new_event_sent, get_prompt
+from src.pairwise_prompt.utils import create_new_sent, get_prompt
 from src.pairwise_prompt.modeling import BertForPrompt, RobertaForPrompt, LongformerForPrompt
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
@@ -176,7 +176,7 @@ def predict(args, model, tokenizer,
     
     e1_sent_idx, e1_sent_start = find_event_sent(e1_start, e1_trigger, sents)
     e2_sent_idx, e2_sent_start = find_event_sent(e2_start, e2_trigger, sents)
-    new_event_sent = create_new_event_sent(
+    new_event_sent = create_new_sent(
         e1_sent_idx, e1_sent_start, e1_trigger, 
         e2_sent_idx, e2_sent_start, e2_trigger, 
         sents, sents_lens, add_mark, context_k, context_max_length, tokenizer

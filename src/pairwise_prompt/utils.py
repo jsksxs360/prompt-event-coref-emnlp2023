@@ -1,6 +1,6 @@
 import numpy as np
 
-def create_new_event_sent(
+def create_new_sent(
     sent1_idx:int, e1_sent_start:int, e1_trigger:str, 
     sent2_idx:int, e2_sent_start:int, e2_trigger:str, 
     sents:list, sents_lens:list, 
@@ -9,19 +9,19 @@ def create_new_event_sent(
     '''
     create segment contains two event mentions
 
-    segment format: xxx E1_START trigger1 E1_END xxx E2_START trigger2 E2_END xxx
+    format: xxx [E1_START] trigger1 [E1_END] xxx [E2_START] trigger2 [E2_END] xxx
 
     Return:
     {
         'new_sent': new segment contains two event mentions, 
-        'e1_sent_start': trigger1 position, 
+        'e1_sent_start': trigger1 offset, 
         'e1_trigger': trigger1, 
-        'e1s_sent_start': E1_START position, 
-        'e1e_sent_start': E1_END position, 
-        'e2_sent_start': trigger2 position, 
+        'e1s_sent_start': E1_START offset, 
+        'e1e_sent_start': E1_END offset, 
+        'e2_sent_start': trigger2 offset, 
         'e2_trigger': trigger2, 
-        'e2s_sent_start': E2_START position, 
-        'e2e_sent_start': E2_END position
+        'e2s_sent_start': E2_START offset, 
+        'e2e_sent_start': E2_END offset
     }
     '''
 

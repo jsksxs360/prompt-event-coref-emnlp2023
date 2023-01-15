@@ -2,8 +2,13 @@ from collections import defaultdict
 from torch.utils.data import Dataset, DataLoader
 import json
 from tqdm.auto import tqdm
-from utils import create_new_event_sent, get_prompt
+from utils import create_new_sent, get_prompt
 
+PROMPT_TYPE = [
+    'hb_d', 'd_hb',  # hard base template
+    'hq_d', 'd_hq',  # hard question-style template
+    'sb_d', 'd_sb'   # soft base template
+]
 SUBTYPES = [ # 18 subtypes
     'artifact', 'transferownership', 'transaction', 'broadcast', 'contact', 'demonstrate', \
     'injure', 'transfermoney', 'transportartifact', 'attack', 'meet', 'elect', \
@@ -49,7 +54,7 @@ class KBPCoref(Dataset):
                         event_1, event_2 = events[i], events[j]
                         event_1_cluster_id = self._get_event_cluster_id(event_1['event_id'], clusters)
                         event_2_cluster_id = self._get_event_cluster_id(event_2['event_id'], clusters)
-                        new_event_sent = create_new_event_sent(
+                        new_event_sent = create_new_sent(
                             event_1['sent_idx'], event_1['sent_start'], event_1['trigger'], 
                             event_2['sent_idx'], event_2['sent_start'], event_2['trigger'], 
                             sentences, sentences_lengths, add_mark, context_k, max_length, self.tokenizer
@@ -143,7 +148,7 @@ class KBPCorefTiny(Dataset):
                             event_1_cluster_id = self._get_event_cluster_id(event_1['event_id'], clusters)
                             event_2_cluster_id = self._get_event_cluster_id(event_2['event_id'], clusters)
                             if event_1_cluster_id == event_2_cluster_id:
-                                new_event_sent = create_new_event_sent(
+                                new_event_sent = create_new_sent(
                                     event_1['sent_idx'], event_1['sent_start'], event_1['trigger'], 
                                     event_2['sent_idx'], event_2['sent_start'], event_2['trigger'], 
                                     sentences, sentences_lengths, add_mark, context_k, max_length, self.tokenizer
@@ -179,7 +184,7 @@ class KBPCorefTiny(Dataset):
                         for e_id in coref_event_ids: # coref
                             event_2 = events_dict[e_id]
                             if event_1['start'] < event_2['start']:
-                                new_event_sent = create_new_event_sent(
+                                new_event_sent = create_new_sent(
                                     event_1['sent_idx'], event_1['sent_start'], event_1['trigger'], 
                                     event_2['sent_idx'], event_2['sent_start'], event_2['trigger'], 
                                     sentences, sentences_lengths, add_mark, context_k, max_length, self.tokenizer
@@ -207,7 +212,7 @@ class KBPCorefTiny(Dataset):
                     for e_id in noncoref_event_ids: # non-coref
                         event_2 = events_dict[e_id]
                         if event_1['start'] < event_2['start']:
-                            new_event_sent = create_new_event_sent(
+                            new_event_sent = create_new_sent(
                                 event_1['sent_idx'], event_1['sent_start'], event_1['trigger'], 
                                 event_2['sent_idx'], event_2['sent_start'], event_2['trigger'], 
                                 sentences, sentences_lengths, add_mark, context_k, max_length, self.tokenizer
@@ -240,11 +245,7 @@ class KBPCorefTiny(Dataset):
 def get_dataLoader(args, dataset, tokenizer, add_mark:str, collote_fn_type:str, prompt_type:str, verbalizer:dict, batch_size:int=None, shuffle:bool=False):
 
     assert add_mark in ADD_MARK_TYPE and collote_fn_type in ['normal']
-    assert prompt_type in [
-        'hb_d', 'd_hb',  # hard base template
-        'hq_d', 'd_hq',  # hard question-style template
-        'sb_d', 'd_sb'  # soft base template
-    ]
+    assert prompt_type in PROMPT_TYPE
     
     if add_mark == 'bert':
         special_token_dict = {
