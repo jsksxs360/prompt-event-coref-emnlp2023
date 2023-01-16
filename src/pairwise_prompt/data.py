@@ -267,22 +267,7 @@ def get_dataLoader(args, dataset, tokenizer, add_mark:str, collote_fn_type:str, 
     assert add_mark in ADD_MARK_TYPE and collote_fn_type in ['normal']
     assert prompt_type in PROMPT_TYPE
     
-    if add_mark == 'bert':
-        special_token_dict = {
-            'e1s_token': '[EVENT1_START]', 'e1e_token': '[EVENT1_END]', 
-            'e2s_token': '[EVENT2_START]', 'e2e_token': '[EVENT2_END]', 
-            'l_token1': '[L_TOKEN1]', 'l_token2': '[L_TOKEN2]', 'l_token3': '[L_TOKEN3]', 
-            'l_token4': '[L_TOKEN4]', 'l_token5': '[L_TOKEN5]', 'l_token6': '[L_TOKEN6]', 
-            'mask_token': '[MASK]'
-        }
-    else:
-        special_token_dict = {
-            'e1s_token': '<event1_start>', 'e1e_token': '<event1_end>', 
-            'e2s_token': '<event2_start>', 'e2e_token': '<event2_end>', 
-            'l_token1': '<l_token1>', 'l_token2': '<l_token2>', 'l_token3': '<l_token3>', 
-            'l_token4': '<l_token4>', 'l_token5': '<l_token5>', 'l_token6': '<l_token6>', 
-            'mask_token': '<mask>'
-        }
+    special_token_dict = BERT_SPECIAL_TOKEN_DICT if add_mark=='bert' else ROBERTA_SPECIAL_TOKEN_DICT
 
     pos_id = tokenizer.convert_tokens_to_ids(verbalizer['COREF_TOKEN'])
     neg_id = tokenizer.convert_tokens_to_ids(verbalizer['NONCOREF_TOKEN'])
