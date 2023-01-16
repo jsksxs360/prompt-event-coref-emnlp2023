@@ -26,6 +26,20 @@ ROBERTA_SPECIAL_TOKENS = [
     '<event1_start>', '<event1_end>', '<event2_start>', '<event2_end>', 
     '<l_token1>', '<l_token2>', '<l_token3>', '<l_token4>', '<l_token5>', '<l_token6>'
 ]
+BERT_SPECIAL_TOKEN_DICT = {
+    'e1s_token': '[EVENT1_START]', 'e1e_token': '[EVENT1_END]', 
+    'e2s_token': '[EVENT2_START]', 'e2e_token': '[EVENT2_END]', 
+    'l_token1': '[L_TOKEN1]', 'l_token2': '[L_TOKEN2]', 'l_token3': '[L_TOKEN3]', 
+    'l_token4': '[L_TOKEN4]', 'l_token5': '[L_TOKEN5]', 'l_token6': '[L_TOKEN6]', 
+    'mask_token': '[MASK]'
+}
+ROBERTA_SPECIAL_TOKEN_DICT = {
+    'e1s_token': '<event1_start>', 'e1e_token': '<event1_end>', 
+    'e2s_token': '<event2_start>', 'e2e_token': '<event2_end>', 
+    'l_token1': '<l_token1>', 'l_token2': '<l_token2>', 'l_token3': '<l_token3>', 
+    'l_token4': '<l_token4>', 'l_token5': '<l_token5>', 'l_token6': '<l_token6>', 
+    'mask_token': '<mask>'
+}
 ADD_MARK_TYPE = ['bert', 'roberta', 'longformer']
 
 class KBPCoref(Dataset):
@@ -42,6 +56,7 @@ class KBPCoref(Dataset):
 
     def load_data(self, data_file, add_mark:str, context_k:int, max_length:int):
         Data = []
+        special_token_dict = BERT_SPECIAL_TOKEN_DICT if add_mark=='bert' else ROBERTA_SPECIAL_TOKEN_DICT
         with open(data_file, 'rt', encoding='utf-8') as f:
             for line in f:
                 sample = json.loads(line.strip())
@@ -57,7 +72,8 @@ class KBPCoref(Dataset):
                         new_event_sent = create_new_sent(
                             event_1['sent_idx'], event_1['sent_start'], event_1['trigger'], 
                             event_2['sent_idx'], event_2['sent_start'], event_2['trigger'], 
-                            sentences, sentences_lengths, add_mark, context_k, max_length, self.tokenizer
+                            sentences, sentences_lengths, 
+                            special_token_dict, context_k, max_length, self.tokenizer
                         )
                         Data.append({
                             'id': sample['doc_id'], 
@@ -134,6 +150,7 @@ class KBPCorefTiny(Dataset):
             return coref_ids
 
         Data = []
+        special_token_dict = BERT_SPECIAL_TOKEN_DICT if add_mark=='bert' else ROBERTA_SPECIAL_TOKEN_DICT
         with open(data_file, 'rt', encoding='utf-8') as f, open(data_file_with_cos, 'rt', encoding='utf-8') as f_cos:
             if pos_top_k == 0: # normal positive samples
                 for line in f: # coref pairs
@@ -151,7 +168,8 @@ class KBPCorefTiny(Dataset):
                                 new_event_sent = create_new_sent(
                                     event_1['sent_idx'], event_1['sent_start'], event_1['trigger'], 
                                     event_2['sent_idx'], event_2['sent_start'], event_2['trigger'], 
-                                    sentences, sentences_lengths, add_mark, context_k, max_length, self.tokenizer
+                                    sentences, sentences_lengths, 
+                                    special_token_dict, context_k, max_length, self.tokenizer
                                 )
                                 Data.append({
                                     'id': sample['doc_id'], 
@@ -187,7 +205,8 @@ class KBPCorefTiny(Dataset):
                                 new_event_sent = create_new_sent(
                                     event_1['sent_idx'], event_1['sent_start'], event_1['trigger'], 
                                     event_2['sent_idx'], event_2['sent_start'], event_2['trigger'], 
-                                    sentences, sentences_lengths, add_mark, context_k, max_length, self.tokenizer
+                                    sentences, sentences_lengths, 
+                                    special_token_dict, context_k, max_length, self.tokenizer
                                 )
                                 Data.append({
                                     'id': sample['doc_id'], 
@@ -215,7 +234,8 @@ class KBPCorefTiny(Dataset):
                             new_event_sent = create_new_sent(
                                 event_1['sent_idx'], event_1['sent_start'], event_1['trigger'], 
                                 event_2['sent_idx'], event_2['sent_start'], event_2['trigger'], 
-                                sentences, sentences_lengths, add_mark, context_k, max_length, self.tokenizer
+                                sentences, sentences_lengths, 
+                                special_token_dict, context_k, max_length, self.tokenizer
                             )
                             Data.append({
                                 'id': sample['doc_id'], 

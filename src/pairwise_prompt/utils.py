@@ -4,7 +4,7 @@ def create_new_sent(
     sent1_idx:int, e1_sent_start:int, e1_trigger:str, 
     sent2_idx:int, e2_sent_start:int, e2_trigger:str, 
     sents:list, sents_lens:list, 
-    add_mark:str, context_k:int, max_length:int, tokenizer
+    special_token_dict:dict, context_k:int, max_length:int, tokenizer
     ):
     '''
     create segment contains two event mentions
@@ -30,11 +30,7 @@ def create_new_sent(
     context_next_list = [sent['text'] for sent in sents[sent2_idx + 1 : sent2_idx + context_k + 1 if sent2_idx + context_k < len(sents) else len(sents)]]
     context_next_lengths = [sent_len for sent_len in sents_lens[sent2_idx + 1 : sent2_idx + context_k + 1 if sent2_idx + context_k < len(sents) else len(sents)]]
 
-    e1s, e1e, e2s, e2e = ( # bert
-        '[EVENT1_START]', '[EVENT1_END]', '[EVENT2_START]', '[EVENT2_END]'
-    ) if add_mark=='bert' else ( # roberta & longformer
-        '<event1_start>', '<event1_end>', '<event2_start>', '<event2_end>'
-    )
+    e1s, e1e, e2s, e2e = special_token_dict['e1s_token'], special_token_dict['e1e_token'], special_token_dict['e2s_token'], special_token_dict['e2e_token']
 
     if sent1_idx == sent2_idx: # two events in the same sentence
         assert e1_sent_start < e2_sent_start

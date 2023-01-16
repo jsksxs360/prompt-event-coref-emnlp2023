@@ -14,6 +14,7 @@ from src.tools import seed_everything, NpEncoder
 from src.pairwise_prompt.arg import parse_args
 from src.pairwise_prompt.data import KBPCoref, KBPCorefTiny, get_dataLoader
 from src.pairwise_prompt.data import BERT_SPECIAL_TOKENS, ROBERTA_SPECIAL_TOKENS
+from src.pairwise_prompt.data import BERT_SPECIAL_TOKEN_DICT, ROBERTA_SPECIAL_TOKEN_DICT
 from src.pairwise_prompt.utils import create_new_sent, get_prompt
 from src.pairwise_prompt.modeling import BertForPrompt, RobertaForPrompt, LongformerForPrompt
 
@@ -174,29 +175,18 @@ def predict(args, model, tokenizer,
             print(sent['start'], sent['start'] + len(sent['text']) - 1)
         return None
     
+    special_token_dict = BERT_SPECIAL_TOKEN_DICT if add_mark=='bert' else ROBERTA_SPECIAL_TOKEN_DICT
+
     e1_sent_idx, e1_sent_start = find_event_sent(e1_start, e1_trigger, sents)
     e2_sent_idx, e2_sent_start = find_event_sent(e2_start, e2_trigger, sents)
+    # create context (segment that contains two event mentions)
     new_event_sent = create_new_sent(
         e1_sent_idx, e1_sent_start, e1_trigger, 
         e2_sent_idx, e2_sent_start, e2_trigger, 
-        sents, sents_lens, add_mark, context_k, context_max_length, tokenizer
+        sents, sents_lens, 
+        special_token_dict, context_k, context_max_length, tokenizer
     )
-    if add_mark == 'bert':
-        special_token_dict = {
-            'e1s_token': '[EVENT1_START]', 'e1e_token': '[EVENT1_END]', 
-            'e2s_token': '[EVENT2_START]', 'e2e_token': '[EVENT2_END]', 
-            'l_token1': '[L_TOKEN1]', 'l_token2': '[L_TOKEN2]', 'l_token3': '[L_TOKEN3]', 
-            'l_token4': '[L_TOKEN4]', 'l_token5': '[L_TOKEN5]', 'l_token6': '[L_TOKEN6]', 
-            'mask_token': '[MASK]'
-        }
-    else:
-        special_token_dict = {
-            'e1s_token': '<event1_start>', 'e1e_token': '<event1_end>', 
-            'e2s_token': '<event2_start>', 'e2e_token': '<event2_end>', 
-            'l_token1': '<l_token1>', 'l_token2': '<l_token2>', 'l_token3': '<l_token3>', 
-            'l_token4': '<l_token4>', 'l_token5': '<l_token5>', 'l_token6': '<l_token6>', 
-            'mask_token': '<mask>'
-        }
+    # create prompt
     prompt_data = get_prompt(
         prompt_type, special_token_dict, new_event_sent['new_sent'], 
         new_event_sent['e1_trigger'], new_event_sent['e1_sent_start'], new_event_sent['e1s_sent_start'], new_event_sent['e1e_sent_start'], 
