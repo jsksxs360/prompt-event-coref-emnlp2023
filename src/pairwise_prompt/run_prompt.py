@@ -30,8 +30,8 @@ MODEL_CLASSES = {
 }
 PROMPT_LENGTH = {
     'hb_d': 40, 'd_hb': 40,  # hard base template
-    'hq_d': 40, 'd_hq': 70,  # hard question-style template
-    'sb_d': 40, 'd_sb': 70   # soft base template
+    'hq_d': 40, 'd_hq': 40,  # hard question-style template
+    'sb_d': 40, 'd_sb': 40   # soft base template
 }
 CONTEXT_K = 2
 
@@ -342,7 +342,6 @@ if __name__ == '__main__':
                         "doc_id": sample['doc_id'], 
                         "document": sample['document'], 
                         "sentences": sents, 
-                        "sentence_lens": sent_lens, 
                         "events": [
                             {
                                 'start': e['start'], 

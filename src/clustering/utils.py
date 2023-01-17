@@ -1,14 +1,15 @@
 import json
 import collections
 
-def get_pred_coref_results(pred_file_path, ):
+def get_pred_coref_results(pred_file_path):
     pred_results = {} # {doc_id: {'events': event_list, 'pred_labels': pred_coref_labels}}
     with open(pred_file_path, 'rt', encoding='utf-8') as f:
         for line in f:
             sample = json.loads(line.strip())
             pred_results[sample['doc_id']] = {
                 'events': sample['events'], 
-                'pred_labels': sample['pred_label']
+                'pred_labels': sample['pred_label'], 
+                'pred_probs': sample['pred_prob']
             }
     return pred_results
 

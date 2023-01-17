@@ -72,7 +72,7 @@ def create_new_sent(
     create segment contains event mentions from two clusters
 
     - cluster1_events, cluster2_events: cluster that contains events, [
-        {'sent_idx': sentence idx, 'trigger': trigger word, }, {'sent_start': trigger offset in the sentence}
+        {'sent_idx': sentence idx, 'trigger': trigger word, 'sent_start': trigger offset in the sentence}, ...
     ]
     - sentences: all the sentences (objects)
     - sentences_lengths: sentence lengths
@@ -129,13 +129,13 @@ def create_new_sent(
         # add rest event sentences
         for sent_idx in c1_sent_idxs[p1:len(c1_sent_idxs)]:
             if length + sent_lengths[sent_idx] + 4 > max_length:
-                    break
+                break
             chosen_sent_idx.add(sent_idx)
             length += sent_lengths[sent_idx] + 4
             check_c1 = True
         for sent_idx in c2_sent_idxs[p2:len(c2_sent_idxs)]:
             if length + sent_lengths[sent_idx] + 4 > max_length:
-                    break
+                break
             chosen_sent_idx.add(sent_idx)
             length += sent_lengths[sent_idx] + 4
             check_c2 = True
@@ -168,7 +168,7 @@ def create_new_sent(
             new_sen += (e1s + event['trigger'] + e1e) if event['cluster'] == 1 else (e2s + event['trigger'] + e2e)
             start_p = event['offset'] + len(event['trigger'])
         new_sen += sentence[start_p:]
-        for event, [s_offset, e_offset] in zip(all_events, new_event_offsets): # check
+        for event, [s_offset, _] in zip(all_events, new_event_offsets): # check
             e_s, e_e = (e1s, e1e) if event['cluster'] == 1 else (e2s, e2e)
             event_span = e_s + event['trigger'] + e_e
             assert new_sen[s_offset:s_offset+len(event_span)] == event_span

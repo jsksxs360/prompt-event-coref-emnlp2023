@@ -12,8 +12,11 @@ sys.path.append('../../')
 from src.tools import seed_everything, NpEncoder
 from src.cluster_prompt.arg import parse_args
 from src.cluster_prompt.data import KBPCorefTiny, get_dataLoader
-from src.cluster_prompt.data import BERT_SPECIAL_TOKENS, ROBERTA_SPECIAL_TOKENS, PROMPT_TYPE
+from src.cluster_prompt.data import BERT_SPECIAL_TOKENS, ROBERTA_SPECIAL_TOKENS
+from src.cluster_prompt.data import BERT_SPECIAL_TOKEN_DICT, ROBERTA_SPECIAL_TOKEN_DICT
+from src.cluster_prompt.utils import create_new_sent, get_prompt
 from src.cluster_prompt.modeling import BertForPrompt, RobertaForPrompt, LongformerForPrompt
+from src.clustering.cluster import create_event_pairs_by_probs
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
                     datefmt='%Y/%m/%d %H:%M:%S',
@@ -26,9 +29,9 @@ MODEL_CLASSES = {
     'longformer': LongformerForPrompt
 }
 PROMPT_LENGTH = {
-    'pmb_d': 40, 'k_pmb_d': 70, # manual prompt
-    'pmq_d': 40, 'k_pmq_d': 70, # manual question-style prompt
-    'pb_d': 40, 'k_pb_d': 70    # learnable prompt
+    'hb_d': 40, 'd_hb': 40,  # hard base template
+    'hq_d': 40, 'd_hq': 40,  # hard question-style template
+    'sb_d': 40, 'd_sb': 40   # soft base template
 }
 
 def to_device(args, batch_data):
@@ -152,6 +155,72 @@ def test(args, test_dataset, model, tokenizer, save_weights:list, add_mark, coll
         with open(os.path.join(args.output_dir, 'test_metrics.txt'), 'at') as f:
             f.write(f'{save_weight}\n{json.dumps(metrics, cls=NpEncoder)}\n\n')
 
+def predict(args, model, tokenizer, 
+    cluster1_events:list, cluster2_events:list, 
+    sents:list, sents_lens:list, context_max_length:int, 
+    add_mark, prompt_type, verbalizer):
+
+    if len(cluster1_events) > len(cluster2_events): # make sure size(cluster1) <= size(cluster2)
+        cluster1_events, cluster2_events = cluster2_events, cluster1_events
+
+    special_token_dict = BERT_SPECIAL_TOKEN_DICT if add_mark=='bert' else ROBERTA_SPECIAL_TOKEN_DICT
+
+    # create context (segment that contains event mentions from two clusters)
+    new_event_sent = create_new_sent(
+        cluster1_events, cluster2_events, sents, sents_lens, 
+        special_token_dict, tokenizer, context_max_length
+    )
+    if not new_event_sent:
+        return 0, 0.
+    # create prompt
+    prompt_data = get_prompt(
+        prompt_type, special_token_dict, new_event_sent['sent'], 
+        new_event_sent['cluster1_trigger'], new_event_sent['cluster2_trigger'], new_event_sent['event_s_e_offset'], 
+        tokenizer
+    )
+    prompt_text = prompt_data['prompt']
+    mask_idx = prompt_data['mask_idx']
+    if add_mark == 'longformer':
+        event_idx = prompt_data['event_idx']
+    inputs = tokenizer(
+        prompt_text, 
+        max_length=args.max_seq_length, 
+        padding=True, 
+        truncation=True, 
+        return_tensors="pt"
+    )
+    inputs = {
+        'batch_inputs': inputs, 
+        'batch_mask_idx': [mask_idx], 
+        'batch_event_idx': [event_idx]
+    } if add_mark == 'longformer' else {
+        'batch_inputs': inputs, 
+        'batch_mask_idx': [mask_idx]
+    }
+    pos_id = tokenizer.convert_tokens_to_ids(verbalizer['COREF_TOKEN'])
+    neg_id = tokenizer.convert_tokens_to_ids(verbalizer['NONCOREF_TOKEN'])
+    inputs = to_device(args, inputs)
+    with torch.no_grad():
+        outputs = model(**inputs)
+        token_logits = outputs[1][:, [neg_id, pos_id]]
+    pred = token_logits.argmax(dim=-1)[0].cpu().numpy().tolist()
+    prob = torch.nn.functional.softmax(token_logits, dim=-1)[0].cpu().numpy().tolist()[pred]
+    return pred, prob
+
+def find_event_sent(event_start, trigger, sent_list):
+    '''find out which sentence the event come from
+    '''
+    for idx, sent in enumerate(sent_list):
+        s_start, s_end = sent['start'], sent['start'] + len(sent['text']) - 1
+        if s_start <= event_start <= s_end:
+            e_s_start = event_start - s_start
+            assert sent['text'][e_s_start:e_s_start+len(trigger)] == trigger
+            return idx, e_s_start
+    print(event_start, trigger, '\n')
+    for sent in sent_list:
+        print(sent['start'], sent['start'] + len(sent['text']) - 1)
+    return None
+
 if __name__ == '__main__':
     args = parse_args()
     if args.do_train and os.path.exists(args.output_dir) and os.listdir(args.output_dir):
@@ -179,7 +248,6 @@ if __name__ == '__main__':
     assert tokenizer.additional_special_tokens == special_start_end_tokens
     model.resize_token_embeddings(len(tokenizer))
 
-    assert args.prompt_type in PROMPT_TYPE
     if 'q' in args.prompt_type: # question style
         verbalizer = {'COREF_TOKEN': 'yes', 'NONCOREF_TOKEN': 'no'}
     else:
@@ -224,3 +292,68 @@ if __name__ == '__main__':
         test(args, test_dataset, model, tokenizer, save_weights, 
             add_mark=args.model_type, collote_fn_type='normal', prompt_type=args.prompt_type, verbalizer=verbalizer
         )
+    # Predicting
+    if args.do_predict:
+        event_pair_prompt_type = 'longformer_sb_d_512_event_tiny3w'
+        pred_event_pair_coref_file = '../clustering/event-event/longformer_sb_d_512_event_tiny3w_test_pred_corefs.json'
+        assert event_pair_prompt_type in pred_event_pair_coref_file
+        
+        for best_save_weight in save_weights:
+            logger.info(f'loading weights from {best_save_weight}...')
+            model.load_state_dict(torch.load(os.path.join(args.output_dir, best_save_weight)))
+            logger.info(f'predicting coref labels of {best_save_weight}...')
+
+            results = []
+            model.eval()
+            with open(pred_event_pair_coref_file, 'rt', encoding='utf-8') as f:
+                for line in tqdm(f.readlines()):
+                    sample = json.loads(line.strip())
+                    sentences = sample['sentences']
+                    sentence_lens = [len(tokenizer(sent['text']).tokens()) for sent in sentences]
+                    events = sample['events']
+                    for idx, e in enumerate(events):
+                        sent_idx, e_sent_start = find_event_sent(e['start'], e['trigger'], sentences)
+                        events[idx]['sent_idx'] = sent_idx
+                        events[idx]['sent_start'] = e_sent_start
+                    event_pair_coref, event_pair_prob = sample['pred_label'], sample['pred_prob']
+                    results = create_event_pairs_by_probs(events, event_pair_coref, event_pair_prob)
+                    while True:
+                        cluster_update = False
+                        for idx_i, cluster_i in enumerate(results):
+                            max_prob, cluster_idx = 0., -1
+                            for idx_j, cluster_j in enumerate(results[idx_i+1:]):
+                                pred, prob = predict(
+                                    args, model, tokenizer, cluster_i, cluster_j, 
+                                    sentences, sentence_lens, args.max_seq_length - PROMPT_LENGTH[args.prompt_type], 
+                                    args.model_type, args.prompt_type, verbalizer
+                                )
+                                if pred == 1 and prob >= max_prob: 
+                                    max_prob = prob
+                                    cluster_idx = idx_j
+                            if cluster_idx != -1:
+                                cluster_update = True
+                                results[idx_i] += results[idx_i+1+cluster_idx] # merge two clusters
+                                del results[idx_i+1+cluster_idx]
+                        if not cluster_update:
+                            break
+                    assert sum([len(cluster) for cluster in results]) == len(events)
+                    # print(results)
+                    results.append({
+                        "doc_id": sample['doc_id'], 
+                        "document": sample['document'], 
+                        "sentences": sentences,  
+                        "events": [
+                            {
+                                'start': e['start'], 
+                                'end': e['start'] + len(e['trigger']) - 1, 
+                                'trigger': e['trigger'], 
+                                'sent_idx': e['sent_idx'], 
+                                'sent_start': e['sent_start']
+                            } for e in events
+                        ], 
+                        "pred_clusters": results
+                    })
+            save_name = f'-{event_pair_prompt_type}-{args.model_type}_{args.prompt_type}-test_pred_clusters.json'
+            with open(os.path.join(args.output_dir, best_save_weight + save_name), 'wt', encoding='utf-8') as f:
+                for example_result in results:
+                    f.write(json.dumps(example_result) + '\n')       
