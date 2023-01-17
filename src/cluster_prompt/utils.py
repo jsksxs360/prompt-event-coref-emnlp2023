@@ -97,6 +97,12 @@ def create_new_sent(
         - max_length: max total length
         '''
 
+        sent_event_num = {} # {sent_idx: event number}
+        for e in cluster1_events + cluster2_events:
+            if e['sent_idx'] not in sent_event_num:
+                sent_event_num[e['sent_idx']] = 1
+            else:
+                sent_event_num[e['sent_idx']] += 1
         c1_sent_idxs, c2_sent_idxs = set([e['sent_idx'] for e in cluster1_events]), set([e['sent_idx'] for e in cluster2_events])
         c1_and_c2_sent_idxs = c1_sent_idxs & c2_sent_idxs
         c1_sent_idxs, c2_sent_idxs = sorted(list(c1_sent_idxs - c1_and_c2_sent_idxs)), sorted(list(c2_sent_idxs - c1_and_c2_sent_idxs))
@@ -105,39 +111,39 @@ def create_new_sent(
         check_c1, check_c2 = False, False # whether events in the cluster are included
         # sentences that contain events from both clusters
         for sent_idx in c1_and_c2_sent_idxs:
-            if length + sent_lengths[sent_idx] + 10 > max_length:
+            if length + sent_lengths[sent_idx] + sent_event_num[sent_idx] * 4 > max_length:
                 break
             chosen_sent_idx.add(sent_idx)
-            length += sent_lengths[sent_idx] + 10
+            length += sent_lengths[sent_idx] + sent_event_num[sent_idx] * 4
             check_c1 = True
             check_c2 = True
         # alternately add event sentences in two clusters
         p1, p2 = 0, 0
         while p1 < len(c1_sent_idxs) and p2 < len(c2_sent_idxs):
-            if length + sent_lengths[c1_sent_idxs[p1]] + 4 > max_length:
+            if length + sent_lengths[c1_sent_idxs[p1]] + sent_event_num[c1_sent_idxs[p1]] * 4 > max_length:
                 break
             chosen_sent_idx.add(c1_sent_idxs[p1])
-            length += sent_lengths[c1_sent_idxs[p1]] + 4
+            length += sent_lengths[c1_sent_idxs[p1]] + sent_event_num[c1_sent_idxs[p1]] * 4
             check_c1 = True
             p1 += 1
-            if length + sent_lengths[c2_sent_idxs[p2]] + 4 > max_length:
+            if length + sent_lengths[c2_sent_idxs[p2]] + sent_event_num[c2_sent_idxs[p2]] * 4 > max_length:
                 break
             chosen_sent_idx.add(c2_sent_idxs[p2])
-            length += sent_lengths[c2_sent_idxs[p2]] + 4
+            length += sent_lengths[c2_sent_idxs[p2]] + sent_event_num[c2_sent_idxs[p2]] * 4
             check_c2 = True
             p2 += 1
         # add rest event sentences
         for sent_idx in c1_sent_idxs[p1:len(c1_sent_idxs)]:
-            if length + sent_lengths[sent_idx] + 4 > max_length:
+            if length + sent_lengths[sent_idx] + sent_event_num[sent_idx] * 4 > max_length:
                 break
             chosen_sent_idx.add(sent_idx)
-            length += sent_lengths[sent_idx] + 4
+            length += sent_lengths[sent_idx] + sent_event_num[sent_idx] * 4
             check_c1 = True
         for sent_idx in c2_sent_idxs[p2:len(c2_sent_idxs)]:
-            if length + sent_lengths[sent_idx] + 4 > max_length:
+            if length + sent_lengths[sent_idx] + sent_event_num[sent_idx] * 4 > max_length:
                 break
             chosen_sent_idx.add(sent_idx)
-            length += sent_lengths[sent_idx] + 4
+            length += sent_lengths[sent_idx] + sent_event_num[sent_idx] * 4
             check_c2 = True
         # assert check_c1 and check_c2
         if not (check_c1 and check_c2):

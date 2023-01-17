@@ -316,12 +316,12 @@ if __name__ == '__main__':
                         events[idx]['sent_idx'] = sent_idx
                         events[idx]['sent_start'] = e_sent_start
                     event_pair_coref, event_pair_prob = sample['pred_label'], sample['pred_prob']
-                    results = create_event_pairs_by_probs(events, event_pair_coref, event_pair_prob)
+                    clusters = create_event_pairs_by_probs(events, event_pair_coref, event_pair_prob)
                     while True:
                         cluster_update = False
-                        for idx_i, cluster_i in enumerate(results):
+                        for idx_i, cluster_i in enumerate(clusters):
                             max_prob, cluster_idx = 0., -1
-                            for idx_j, cluster_j in enumerate(results[idx_i+1:]):
+                            for idx_j, cluster_j in enumerate(clusters[idx_i+1:]):
                                 pred, prob = predict(
                                     args, model, tokenizer, cluster_i, cluster_j, 
                                     sentences, sentence_lens, args.max_seq_length - PROMPT_LENGTH[args.prompt_type], 
@@ -332,12 +332,12 @@ if __name__ == '__main__':
                                     cluster_idx = idx_j
                             if cluster_idx != -1:
                                 cluster_update = True
-                                results[idx_i] += results[idx_i+1+cluster_idx] # merge two clusters
-                                del results[idx_i+1+cluster_idx]
+                                clusters[idx_i] += clusters[idx_i+1+cluster_idx] # merge two clusters
+                                del clusters[idx_i+1+cluster_idx]
                         if not cluster_update:
                             break
-                    assert sum([len(cluster) for cluster in results]) == len(events)
-                    # print(results)
+                    assert sum([len(cluster) for cluster in clusters]) == len(events)
+                    # print(clusters)
                     results.append({
                         "doc_id": sample['doc_id'], 
                         "document": sample['document'], 
@@ -351,7 +351,7 @@ if __name__ == '__main__':
                                 'sent_start': e['sent_start']
                             } for e in events
                         ], 
-                        "pred_clusters": results
+                        "pred_clusters": clusters
                     })
             save_name = f'-{event_pair_prompt_type}-{args.model_type}_{args.prompt_type}-test_pred_clusters.json'
             with open(os.path.join(args.output_dir, best_save_weight + save_name), 'wt', encoding='utf-8') as f:
