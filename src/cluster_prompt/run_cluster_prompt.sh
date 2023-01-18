@@ -1,9 +1,10 @@
-export OUTPUT_DIR=./longformer_pb_d_512_results/
+export OUTPUT_DIR=./longformer_sb_d_512_event_results/
 
 python3 run_cluster_prompt.py \
     --output_dir=$OUTPUT_DIR \
     --prompt_type=sb_d \
     --model_type=longformer \
+    --longformer_global_att=event \
     --model_checkpoint=../../PT_MODELS/allenai/longformer-large-4096/ \
     --train_file=../../data/train_filtered.json \
     --dev_file=../../data/dev_filtered.json \

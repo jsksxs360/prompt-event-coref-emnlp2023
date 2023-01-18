@@ -240,6 +240,7 @@ if __name__ == '__main__':
     model = MODEL_CLASSES[args.model_type].from_pretrained(
         args.model_checkpoint,
         config=config, 
+        args=args, 
         cache_dir=args.cache_dir
     ).to(args.device)
     special_tokens = BERT_SPECIAL_TOKENS if args.model_type == 'bert' else  ROBERTA_SPECIAL_TOKENS

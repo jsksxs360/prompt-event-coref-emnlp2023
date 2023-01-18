@@ -31,6 +31,10 @@ def parse_args():
     parser.add_argument("--cache_dir", default=None, type=str,
         help="Where do you want to store the pre-trained models downloaded from s3"
     )
+    parser.add_argument("--longformer_global_att", default=None, type=str,
+        help="global attention of longformer.", 
+        choices=['no', 'mask', 'event', 'mask&event']
+    )
     
     parser.add_argument("--learning_rate", default=1e-5, type=float, help="The initial learning rate for Adam.")
     parser.add_argument("--num_train_epochs", default=3, type=int, help="Total number of training epochs to perform.")
