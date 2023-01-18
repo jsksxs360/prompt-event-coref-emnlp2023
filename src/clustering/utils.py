@@ -13,6 +13,16 @@ def get_pred_coref_results(pred_file_path):
             }
     return pred_results
 
+def get_pred_clusters(pred_file_path):
+    pred_results = {} # {doc_id: [[c1_e1_start, c1_e2_start, ...], ...]}
+    with open(pred_file_path, 'rt', encoding='utf-8') as f:
+        for line in f:
+            sample = json.loads(line.strip())
+            pred_results[sample['doc_id']] = [
+                [event['start'] for event in cluster] for cluster in sample['pred_clusters']
+            ]
+    return pred_results
+
 def create_golden_conll_file(test_file_path, conll_file_path):
 
     def get_event_cluster_idx(event_id:str, clusters):

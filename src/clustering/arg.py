@@ -10,8 +10,11 @@ def parse_args():
     parser.add_argument("--test_golden_filepath", default=None, type=str, required=True, 
         help="golden test set file path.",
     )
-    parser.add_argument("--test_pred_filepath", default=None, type=str, required=True, 
+    parser.add_argument("--test_pred_filepath", default=None, type=str, required=False, 
         help="predicted coref file path.",
+    )
+    parser.add_argument("--test_cluster_filepath", default=None, type=str, required=False, 
+        help="predicted cluster file path.",
     )
     parser.add_argument("--golden_conll_filename", default=None, type=str, required=True)
     parser.add_argument("--pred_conll_filename", default=None, type=str, required=True)
