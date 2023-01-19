@@ -13,8 +13,12 @@ def parse_args():
     parser.add_argument("--dev_file_with_cos", default=None, type=str, required=False, help="Input evaluation file with similarities.")
     parser.add_argument("--test_file_with_cos", default=None, type=str, required=False, help="Input testing file with similarities.")
     # tiny dataset
-    parser.add_argument("--pos_r", default="1.", type=float)
-    parser.add_argument("--neg_r", default="1.", type=float)
+    parser.add_argument("--train_pos_k", type=int, required=True)
+    parser.add_argument("--train_neg_k", type=int, required=True)
+    parser.add_argument("--dev_pos_k", type=int, required=True)
+    parser.add_argument("--dev_neg_k", type=int, required=True)
+    parser.add_argument("--test_pos_k", type=int, required=True)
+    parser.add_argument("--test_neg_k", type=int, required=True)
     
     parser.add_argument("--model_type", default="bert", type=str, required=True, choices=['bert', 'roberta', 'longformer'])
     parser.add_argument("--model_checkpoint",
@@ -34,7 +38,7 @@ def parse_args():
     )
     parser.add_argument("--longformer_global_att", default=None, type=str,
         help="global attention of longformer.", 
-        choices=['no', 'mask', 'event', 'mask&event']
+        choices=['no', 'event', 'mask_event']
     )
     
     parser.add_argument("--learning_rate", default=1e-5, type=float, help="The initial learning rate for Adam.")

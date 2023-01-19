@@ -64,19 +64,11 @@ class LongformerForPrompt(LongformerPreTrainedModel):
             if 'mask' in self.global_att:
                 global_attention_mask.scatter_(1, batch_mask_idx.unsqueeze(-1), 1)
             if 'event' in self.global_att:
-                for b_idx, (e1s, e1e, e2s, e2e) in enumerate(batch_event_idx):
-                    global_attention_mask[b_idx][e1s:e1e+1] = 1
-                    global_attention_mask[b_idx][e2s:e2e+1] = 1
+                for b_idx, event_idxs in enumerate(batch_event_idx):
+                    for e_start, e_end in event_idxs:
+                        global_attention_mask[b_idx][e_start:e_end+1] = 1
             batch_inputs['global_attention_mask'] = global_attention_mask
-        
-        # global attention on mask token
-        global_attention_mask = torch.zeros_like(batch_inputs['input_ids'])
-        global_attention_mask.scatter_(1, batch_mask_idx.unsqueeze(-1), 1)
-        for b_idx, event_idxs in enumerate(batch_event_idx):
-            for e_start, e_end in event_idxs:
-                global_attention_mask[b_idx][e_start:e_end+1] = 1
-        batch_inputs['global_attention_mask'] = global_attention_mask
-        
+
         outputs = self.longformer(**batch_inputs)
         sequence_output = outputs.last_hidden_state
         mask_reps = batched_index_select(sequence_output, 1, batch_mask_idx.unsqueeze(-1))

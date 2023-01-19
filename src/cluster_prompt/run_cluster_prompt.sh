@@ -12,8 +12,12 @@ python3 run_cluster_prompt.py \
     --train_file_with_cos=../../data/train_filtered_with_cos.json \
     --dev_file_with_cos=../../data/dev_filtered_with_cos.json \
     --test_file_with_cos=../../data/test_filtered_with_cos.json \
-    --pos_r=1. \
-    --neg_r=1.5 \
+    --train_pos_k=10 \
+    --train_neg_k=5 \
+    --dev_pos_k=15 \
+    --dev_neg_k=5 \
+    --test_pos_k=10 \
+    --test_neg_k=15 \
     --max_seq_length=512 \
     --learning_rate=1e-5 \
     --num_train_epochs=20 \

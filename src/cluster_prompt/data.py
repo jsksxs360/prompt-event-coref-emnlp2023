@@ -2,12 +2,11 @@ from torch.utils.data import Dataset, DataLoader
 from tqdm.auto import tqdm
 import numpy as np
 import json
-from collections import Counter
-from utils import create_fake_cluster, create_event_simi_dict
+from utils import create_event_simi_dict, cal_cluster_simi
 from utils import create_new_sent, get_prompt
 from utils import get_all_events_in_cluster
 
-MAX_LOOP_NUM = 1000
+MAX_LOOP_NUM = 100
 RANDOM_SEED = 42
 
 PROMPT_TYPE = [
@@ -43,19 +42,22 @@ np.random.seed(RANDOM_SEED)
 
 class KBPCorefTiny(Dataset):
     
-    def __init__(self, data_file:str, data_file_with_cos:str, pos_r:float, neg_r:float, add_mark:str, tokenizer, max_length:int, fake_cluster_k=2):
+    def __init__(self, data_file:str, data_file_with_cos:str, pos_k:int, neg_k:int, add_mark:str, tokenizer, max_length:int):
         '''
         - data_file: source train data file
         - data_file_with_cos: train data file with event similarities
         '''
-        assert 0. < pos_r <= 1. and neg_r > 0. and max_length > 0
+        assert pos_k > 0 and neg_k > 0 and max_length > 0
         assert add_mark in ADD_MARK_TYPE
         self.tokenizer = tokenizer
-        self.data = self.load_data(data_file, data_file_with_cos, add_mark, pos_r, neg_r, max_length, fake_cluster_k)
+        self.pos_k = pos_k
+        self.neg_k = neg_k
+        self.max_length = max_length
+        self.special_token_dict = BERT_SPECIAL_TOKEN_DICT if add_mark=='bert' else ROBERTA_SPECIAL_TOKEN_DICT
+        self.data = self.load_data(data_file, data_file_with_cos)
     
-    def load_data(self, data_file, data_file_with_cos, add_mark, pos_r, neg_r, max_length, fake_cluster_k):
+    def load_data(self, data_file, data_file_with_cos):
         Data = []
-        special_token_dict = BERT_SPECIAL_TOKEN_DICT if add_mark=='bert' else ROBERTA_SPECIAL_TOKEN_DICT
         with open(data_file, 'rt', encoding='utf-8') as f, open(data_file_with_cos, 'rt', encoding='utf-8') as f_cos:
             ##################### coref cluster pairs (positive samples) #####################
             for line in tqdm(f.readlines()): 
@@ -72,23 +74,26 @@ class KBPCorefTiny(Dataset):
                         sampled_c1_indexs = []
                         while True:
                             loop_num += 1
-                            if sample_num >= cluster_size * pos_r or loop_num > MAX_LOOP_NUM:
+                            if sample_num >= self.pos_k or loop_num > MAX_LOOP_NUM:
                                 break
-                            c1_indexs = set(np.random.choice(np.random.permutation(cluster_size), c1_size, replace=False)) # random, random, random!
-                            if c1_indexs in sampled_c1_indexs: # filter same sampled c1
+                            # randomly select c1_size events to create cluster 1
+                            c1_indexs = set(np.random.choice(np.random.permutation(cluster_size), c1_size, replace=False))
+                            if c1_indexs in sampled_c1_indexs: # filter same cluster 1
                                 continue
                             sampled_c1_indexs.append(c1_indexs)
                             c1_events = [event for idx, event in enumerate(cluster_events) if idx in c1_indexs]
-                            c2_size = np.random.randint(c1_size, cluster_size - c1_size + 1) # sample cluster 2
+                            # randomly select more than c1_size events to create cluster 2
+                            c2_size = np.random.randint(c1_size, cluster_size - c1_size + 1)
                             c2_indexs = set(np.random.choice(list(set(range(cluster_size)) - c1_indexs), c2_size, replace=False))
                             c2_events = [event for idx, event in enumerate(cluster_events) if idx in c2_indexs]
+                            # create segment contains events from two clusters
                             my_sample = create_new_sent(
                                 c1_events, c2_events, sentences, sentences_lengths, 
-                                special_token_dict, tokenizer, max_length
+                                self.special_token_dict, self.tokenizer, self.max_length
                             )
                             if not my_sample:
                                 continue
-                            my_sample['id'], my_sample['label'], my_sample['type'] = sample['doc_id'], 1, '1'
+                            my_sample['id'], my_sample['label'] = sample['doc_id'], 1
                             Data.append(my_sample)
                             sample_num += 1
             ##################### non-coref cluster pairs (negtive samples) #####################
@@ -96,61 +101,50 @@ class KBPCorefTiny(Dataset):
                 sample = json.loads(line.strip())
                 clusters, sentences, events_list = sample['clusters'], sample['sentences'], sample['events']
                 event_simi_dict = create_event_simi_dict(sample['event_pairs_id'], sample['event_pairs_cos'], clusters)
-                events_dict = {e['event_id']:e for e in events_list}
+                # events_dict = {e['event_id']: e for e in events_list}
                 sentences_lengths = [len(self.tokenizer(sent['text']).tokens()) for sent in sentences]
                 cluster_sizes = [len(cluster['events']) for cluster in clusters]
                 clusters = [get_all_events_in_cluster(events_list, cluster['events']) for cluster in clusters]
                 for c_idx, cluster_events in enumerate(clusters):
                     cluster_size = cluster_sizes[c_idx]
-                    if cluster_size < 3 or len(events_list) < 2 * cluster_size:
+                    if cluster_size < 3:
                         continue
                     for c1_size in range(1, cluster_size // 2 + 1):
-                        sample_num, loop_num = 0, 0
-                        for other_c_idx, other_cluster_events in enumerate(clusters): # other cluster
-                            if sample_num >= cluster_size * neg_r or loop_num > MAX_LOOP_NUM:
-                                break
+                        # sample other clusters as cluster 2
+                        for other_c_idx, other_cluster_events in enumerate(clusters): 
                             other_cluster_size = cluster_sizes[other_c_idx]
                             if other_c_idx == c_idx or other_cluster_size < 2 or other_cluster_size < c1_size:
                                 continue
-                            loop_num += 1
-                            c1_indexs = set(np.random.choice(np.random.permutation(cluster_size), c1_size, replace=False)) # random, random, random!
-                            c1_events = [event for idx, event in enumerate(cluster_events) if idx in c1_indexs]
-                            c2_size = np.random.randint(c1_size, other_cluster_size + 1)
-                            c2_indexs = set(np.random.choice(np.random.permutation(other_cluster_size), c2_size, replace=False))
-                            c2_events = [event for idx, event in enumerate(other_cluster_events) if idx in c2_indexs]
-                            my_sample = create_new_sent(
-                                c1_events, c2_events, sentences, sentences_lengths, 
-                                special_token_dict, tokenizer, max_length
-                            )
-                            if not my_sample:
-                                continue
-                            my_sample['id'], my_sample['label'], my_sample['type'] = sample['doc_id'], 0, '0-1'
-                            Data.append(my_sample)
-                            sample_num += 1
-                        sampled_c1_indexs = []
-                        while True: # fake cluster 2
-                            loop_num += 1
-                            if sample_num >= cluster_size * neg_r or loop_num > MAX_LOOP_NUM:
-                                break
-                            c1_indexs = set(np.random.choice(np.random.permutation(cluster_size), c1_size, replace=False)) # random, random, random!
-                            if c1_indexs in sampled_c1_indexs: # filter same sampled c1 (c2)
-                                continue
-                            sampled_c1_indexs.append(c1_indexs)
-                            c1_events = [event for idx, event in enumerate(cluster_events) if idx in c1_indexs]
-                            c2_size = np.random.randint(c1_size, cluster_size - c1_size + 1) # sample cluster 2
-                            c2_indexs = set(np.random.choice(list(set(range(cluster_size)) - c1_indexs), c2_size, replace=False))
-                            c2_events = [event for idx, event in enumerate(cluster_events) if idx in c2_indexs]
-                            fake_clusters = create_fake_cluster(c2_events, event_simi_dict, events_dict, fake_cluster_k)
-                            for fake_c2_events in fake_clusters:
+                            cluster_pair_list = []
+                            sample_num, loop_num = 0, 0
+                            sampled_c2_indexs = []
+                            while True:
+                                loop_num += 1
+                                if sample_num >= self.neg_k * 2 or loop_num > MAX_LOOP_NUM:
+                                    break
+                                # randomly select c1_size events to create cluster 1
+                                c1_indexs = set(np.random.choice(np.random.permutation(cluster_size), c1_size, replace=False))
+                                c1_events = [event for idx, event in enumerate(cluster_events) if idx in c1_indexs]
+                                # randomly select more than c1_size events to create cluster 2
+                                c2_size = np.random.randint(c1_size, other_cluster_size + 1)
+                                c2_indexs = set(np.random.choice(np.random.permutation(other_cluster_size), c2_size, replace=False))
+                                if c2_indexs in sampled_c2_indexs: # filter same cluster 2
+                                    continue
+                                sampled_c2_indexs.append(c2_indexs)
+                                c2_events = [event for idx, event in enumerate(other_cluster_events) if idx in c2_indexs]
+                                cluster_pair_list.append([c1_events, c2_events, cal_cluster_simi(c1_events, c2_events, event_simi_dict)])
+                                sample_num += 1
+                            cluster_pair_list.sort(key=lambda x:x[2], reverse=True)
+                            for cluster_pair in cluster_pair_list[:self.neg_k]:
+                                # create segment contains events from two clusters
                                 my_sample = create_new_sent(
-                                    c1_events, fake_c2_events, sentences, sentences_lengths, 
-                                    special_token_dict, tokenizer, max_length
+                                    cluster_pair[0], cluster_pair[1], sentences, sentences_lengths, 
+                                    self.special_token_dict, self.tokenizer, self.max_length
                                 )
                                 if not my_sample:
                                     continue
-                                my_sample['id'], my_sample['label'], my_sample['type'] = sample['doc_id'], 0, '0-2'
+                                my_sample['id'], my_sample['label'] = sample['doc_id'], 0
                                 Data.append(my_sample)
-                                sample_num += 1
         return Data
 
     def __len__(self):
@@ -262,14 +256,12 @@ if __name__ == '__main__':
 
     train_small_data = KBPCorefTiny(
         '../../data/train_filtered.json', '../../data/train_filtered_with_cos.json', 
-        pos_r=1., neg_r=1.5, add_mark=args.model_type, tokenizer=tokenizer, max_length=512-40
+        pos_k=10, neg_k=5, add_mark=args.model_type, tokenizer=tokenizer, max_length=512-40
     )
     print_data_statistic('../../data/train_filtered_with_cos.json')
     print(len(train_small_data))
     labels = [train_small_data[s_idx]['label'] for s_idx in range(len(train_small_data))]
     print('Coref:', labels.count(1), 'non-Coref:', labels.count(0))
-    types = Counter([train_small_data[s_idx]['type'] for s_idx in range(len(train_small_data))])
-    print(types.most_common())
     print(train_small_data[0])
     print('Testing dataset...')
     for _ in tqdm(train_small_data):

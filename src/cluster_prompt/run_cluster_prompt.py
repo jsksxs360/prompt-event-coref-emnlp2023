@@ -84,6 +84,8 @@ def test_loop(args, dataloader, dataset, model, neg_id, pos_id):
     return classification_report(true_labels, predictions, output_dict=True)
 
 def train(args, train_dataset, dev_dataset, model, tokenizer, add_mark, collote_fn_type, prompt_type, verbalizer):
+    # Set seed
+    seed_everything(args.seed)
     """ Train the model """
     train_dataloader = get_dataLoader(
         args, train_dataset, tokenizer, add_mark=add_mark, collote_fn_type=collote_fn_type, 
@@ -256,24 +258,32 @@ if __name__ == '__main__':
     logger.info(f'verbalizer: {verbalizer} ...')
     # Training
     if args.do_train:
+        # Set seed
+        seed_everything(args.seed)
         train_dataset = KBPCorefTiny(
             args.train_file, 
             args.train_file_with_cos, 
-            pos_r=args.pos_r, 
-            neg_r=args.neg_r, 
+            pos_k=args.train_pos_k, 
+            neg_k=args.train_neg_k, 
             add_mark=args.model_type,  
             tokenizer=tokenizer, 
             max_length=args.max_seq_length - PROMPT_LENGTH[args.prompt_type]
         )
+        labels = [train_dataset[s_idx]['label'] for s_idx in range(len(train_dataset))]
+        logger.info(f"[Train] Coref: {labels.count(1)} non-Coref: {labels.count(0)}")
+        # Set seed
+        seed_everything(args.seed)
         dev_dataset = KBPCorefTiny(
             args.dev_file, 
             args.dev_file_with_cos, 
-            pos_r=args.pos_r, 
-            neg_r=args.neg_r, 
+            pos_k=args.dev_pos_k, 
+            neg_k=args.dev_neg_k, 
             add_mark=args.model_type,  
             tokenizer=tokenizer, 
             max_length=args.max_seq_length - PROMPT_LENGTH[args.prompt_type]
         )
+        labels = [dev_dataset[s_idx]['label'] for s_idx in range(len(dev_dataset))]
+        logger.info(f"[Dev] Coref: {labels.count(1)} non-Coref: {labels.count(0)}")
         train(args, train_dataset, dev_dataset, model, tokenizer, 
             add_mark=args.model_type, collote_fn_type='normal', prompt_type=args.prompt_type, verbalizer=verbalizer
         )
@@ -283,12 +293,14 @@ if __name__ == '__main__':
         test_dataset = KBPCorefTiny(
             args.test_file, 
             args.test_file_with_cos, 
-            pos_r=args.pos_r, 
-            neg_r=args.neg_r, 
+            pos_k=args.test_pos_k, 
+            neg_k=args.test_neg_k, 
             add_mark=args.model_type, 
             tokenizer=tokenizer, 
             max_length=args.max_seq_length - PROMPT_LENGTH[args.prompt_type]
         )
+        labels = [test_dataset[s_idx]['label'] for s_idx in range(len(test_dataset))]
+        logger.info(f"[Test] Coref: {labels.count(1)} non-Coref: {labels.count(0)}")
         logger.info(f'loading trained weights from {args.output_dir} ...')
         test(args, test_dataset, model, tokenizer, save_weights, 
             add_mark=args.model_type, collote_fn_type='normal', prompt_type=args.prompt_type, verbalizer=verbalizer

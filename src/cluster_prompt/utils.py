@@ -22,44 +22,33 @@ def create_event_simi_dict(event_pairs_id:list, event_pairs_cos:list, clusters:l
         simi_list.sort(key=lambda x:x['cos'], reverse=True)
     return simi_dict
 
-def create_fake_cluster(cluster_events, simi_dict, events_dict, fake_cluster_k):
+def cal_cluster_simi(cluster1_events:list, cluster2_events:list, simi_dict):
+    '''use event similarity to calculate cluster similarity
     '''
-    create fake cluster by replacing events with similar non-coreference events
-
-    - cluster_events: source cluster
-    - simi_dict: event similarity dict (sort by similarity in descending order)
-    - events_dict: {event_id: event}
-    - fake_cluster_k: number of fake cluster
-    '''
-
-    def get_noncoref_ids(simi_list):
-        noncoref_ids = []
-        for simi in simi_list:
-            if simi['coref'] == 0:
-                noncoref_ids.append(simi['id'])
-        return noncoref_ids
-
-    noncoref_event_ids = {
-        e['event_id']:get_noncoref_ids(simi_dict[e['event_id']]) for e in cluster_events
-    }
-    fake_clusters, saved_fake_clusters = [], []
-    for k in range(fake_cluster_k):
-        fake_cluster = []
-        for e in cluster_events:
-            noncoref_events = noncoref_event_ids[e['event_id']]
-            if k >= len(noncoref_events):
+    cluster1_events_ids = [e['event_id'] for e in cluster1_events]
+    cluster2_events_ids = [e['event_id'] for e in cluster2_events]
+    simi_sum = 0.
+    for e_i_id in cluster1_events_ids:
+        max_simi = 0
+        for item in simi_dict[e_i_id]:
+            if item['id'] in cluster2_events_ids:
+                max_simi = item['cos']
                 break
-            for e_id in noncoref_events[k:]:
-                if e_id not in fake_cluster:
-                    fake_cluster.append(e_id)
-                    break
-        if len(fake_cluster) == len(cluster_events):
-            fake_cluster_set = set(fake_cluster)
-            if fake_cluster_set in saved_fake_clusters: # filter same cluster
-                continue
-            fake_clusters.append([events_dict[e_id] for e_id in fake_cluster])
-            saved_fake_clusters.append(fake_cluster_set)
-    return fake_clusters
+        if max_simi == 0:
+            raise ValueError(f'Unknown event_id: {e_i_id}')
+        else:
+            simi_sum += max_simi
+    for e_i_id in cluster2_events_ids:
+        max_simi = 0
+        for item in simi_dict[e_i_id]:
+            if item['id'] in cluster1_events_ids:
+                max_simi = item['cos']
+                break
+        if max_simi == 0:
+            raise ValueError(f'Unknown event_id: {e_i_id}')
+        else:
+            simi_sum += max_simi
+    return simi_sum / (len(cluster1_events) + len(cluster2_events))
 
 get_all_events_in_cluster = lambda event_list, cluster: [event for event in event_list if event['event_id'] in cluster]
 
@@ -71,107 +60,117 @@ def create_new_sent(
     '''
     create segment contains event mentions from two clusters
 
-    - cluster1_events, cluster2_events: cluster that contains events, [
-        {'sent_idx': sentence idx, 'trigger': trigger word, 'sent_start': trigger offset in the sentence}, ...
+    - cluster1_events, cluster2_events: [
+        {'start': global offset, 'trigger': trigger word, 'sent_idx': sentence idx, 'sent_start': local offset in the sentence}, ...
     ]
-    - sentences: all the sentences (objects)
-    - sentences_lengths: sentence lengths
 
     Return:
     {
         'sent': new segment contains all the event mentions, 
-        'event_s_e_offset': event_s_e_offsets, 
-        'cluster1_trigger': trigger1, 
-        'cluster2_trigger': trigger2
+        'event_s_e_offset': event offsets in the new segment, 
+        'cluster1_trigger': representative trigger1, 
+        'cluster2_trigger': representative trigger2
     }
     '''
 
     def choose_sent_idxs(cluster1_events:list, cluster2_events:list, sent_lengths:list, max_length:int) -> set:
         '''
-        choose event sentences to control the total length, prefer sentences that contain events from both clusters
+        choose event sentences to control the total length, 
+        prefer sentences that contain events from both clusters
         
-        warning: some events may be dropped by this operation
-
-        - cluster1_events, cluster2_events: cluster that contains events
-        - sent_lengths: sentence lengths
-        - max_length: max total length
+        warning: some events may be dropped
         '''
 
         sent_event_num = {} # {sent_idx: event number}
         for e in cluster1_events + cluster2_events:
-            if e['sent_idx'] not in sent_event_num:
-                sent_event_num[e['sent_idx']] = 1
-            else:
-                sent_event_num[e['sent_idx']] += 1
+            sent_event_num[e['sent_idx']] = sent_event_num.get(e['sent_idx'], 0) + 1
         c1_sent_idxs, c2_sent_idxs = set([e['sent_idx'] for e in cluster1_events]), set([e['sent_idx'] for e in cluster2_events])
-        c1_and_c2_sent_idxs = c1_sent_idxs & c2_sent_idxs
-        c1_sent_idxs, c2_sent_idxs = sorted(list(c1_sent_idxs - c1_and_c2_sent_idxs)), sorted(list(c2_sent_idxs - c1_and_c2_sent_idxs))
-        chosen_sent_idx = set()
-        length = 0
+        c1_and_c2_sent_idxs = sorted(list(c1_sent_idxs & c2_sent_idxs), key=lambda x:sent_event_num[x], reverse=True)
+        c1_sent_idxs, c2_sent_idxs = sorted(list(c1_sent_idxs - set(c1_and_c2_sent_idxs))), sorted(list(c2_sent_idxs - set(c1_and_c2_sent_idxs)))
+        
+        chosen_sent_idx, total_length = set(), 0
         check_c1, check_c2 = False, False # whether events in the cluster are included
-        # sentences that contain events from both clusters
+        # sentences contain events from both clusters
         for sent_idx in c1_and_c2_sent_idxs:
-            if length + sent_lengths[sent_idx] + sent_event_num[sent_idx] * 4 > max_length:
-                break
+            sent_length = sent_lengths[sent_idx] + sent_event_num[sent_idx] * 4
+            if total_length + sent_length > max_length:
+                continue
             chosen_sent_idx.add(sent_idx)
-            length += sent_lengths[sent_idx] + sent_event_num[sent_idx] * 4
-            check_c1 = True
-            check_c2 = True
+            total_length += sent_length
+            check_c1, check_c2 = True, True
         # alternately add event sentences in two clusters
-        p1, p2 = 0, 0
+        p, p1, p2 = 'c1', 0, 0
         while p1 < len(c1_sent_idxs) and p2 < len(c2_sent_idxs):
-            if length + sent_lengths[c1_sent_idxs[p1]] + sent_event_num[c1_sent_idxs[p1]] * 4 > max_length:
-                break
-            chosen_sent_idx.add(c1_sent_idxs[p1])
-            length += sent_lengths[c1_sent_idxs[p1]] + sent_event_num[c1_sent_idxs[p1]] * 4
-            check_c1 = True
-            p1 += 1
-            if length + sent_lengths[c2_sent_idxs[p2]] + sent_event_num[c2_sent_idxs[p2]] * 4 > max_length:
-                break
-            chosen_sent_idx.add(c2_sent_idxs[p2])
-            length += sent_lengths[c2_sent_idxs[p2]] + sent_event_num[c2_sent_idxs[p2]] * 4
-            check_c2 = True
-            p2 += 1
+            if p == 'c1':
+                sent_length = sent_lengths[c1_sent_idxs[p1]] + sent_event_num[c1_sent_idxs[p1]] * 4
+                if total_length + sent_length > max_length:
+                    p1 += 1
+                    continue
+                chosen_sent_idx.add(c1_sent_idxs[p1])
+                total_length += sent_length
+                check_c1 = True
+                p1 += 1
+                p = 'c2'
+            if p == 'c2':
+                sent_length = sent_lengths[c2_sent_idxs[p2]] + sent_event_num[c2_sent_idxs[p2]] * 4
+                if total_length + sent_length > max_length:
+                    p2 += 1
+                    continue
+                chosen_sent_idx.add(c2_sent_idxs[p2])
+                total_length += sent_length
+                check_c2 = True
+                p2 += 1
+                p = 'c1'
         # add rest event sentences
-        for sent_idx in c1_sent_idxs[p1:len(c1_sent_idxs)]:
-            if length + sent_lengths[sent_idx] + sent_event_num[sent_idx] * 4 > max_length:
-                break
+        for sent_idx in c1_sent_idxs[p1:]:
+            sent_length = sent_lengths[sent_idx] + sent_event_num[sent_idx] * 4
+            if total_length + sent_length > max_length:
+                continue
             chosen_sent_idx.add(sent_idx)
-            length += sent_lengths[sent_idx] + sent_event_num[sent_idx] * 4
+            total_length += sent_length
             check_c1 = True
-        for sent_idx in c2_sent_idxs[p2:len(c2_sent_idxs)]:
-            if length + sent_lengths[sent_idx] + sent_event_num[sent_idx] * 4 > max_length:
-                break
+        for sent_idx in c2_sent_idxs[p2:]:
+            sent_length = sent_lengths[sent_idx] + sent_event_num[sent_idx] * 4
+            if total_length + sent_length > max_length:
+                continue
             chosen_sent_idx.add(sent_idx)
-            length += sent_lengths[sent_idx] + sent_event_num[sent_idx] * 4
+            total_length += sent_length
             check_c2 = True
-        # assert check_c1 and check_c2
-        if not (check_c1 and check_c2):
+        if not (check_c1 and check_c2): # contain events from both two clusters
             return None
-        chosen_event_num = sum([1 for e in cluster1_events + cluster2_events if e['sent_idx'] in chosen_sent_idx])
-        if chosen_event_num < 3: # at least 3 events should be chosen
+        if sum([sent_event_num[sent_idx] for sent_idx in chosen_sent_idx]) < 3: # at least 3 events should be chosen
             return None
+        # add middle sentences
+        chosen_sent_idx_list = sorted(list(chosen_sent_idx))
+        for idx in range(len(chosen_sent_idx_list) - 1):
+            for s_idx in range(chosen_sent_idx_list[idx] + 1, chosen_sent_idx_list[idx + 1]):
+                if total_length + sent_lengths[s_idx] > max_length:
+                    continue
+                chosen_sent_idx.add(s_idx)
+                total_length += sent_lengths[s_idx]
         return chosen_sent_idx
 
     def get_sen_with_events(sentence:str, cluster1_events, cluster2_events):
-        '''add special label for triggers in the sentence
+        '''add special labels around triggers in the sentence
 
         return: 
         - new_sen: new segment that contains all the triggers with special labels
-        - new_event_offsets: [e_s_offset, e_e_offset]
+        - new_event_offsets: [[event_start_label_offset, event_end_label_offset]]
         '''
+        if len(cluster1_events) == 0 and len(cluster2_events) == 0:
+            return sentence, []
         all_events = []
         all_events += [{'offset': event['sent_start'], 'trigger': event['trigger'], 'cluster': 1} for event in cluster1_events]
         all_events += [{'offset': event['sent_start'], 'trigger': event['trigger'], 'cluster': 2} for event in cluster2_events]
         all_events.sort(key=lambda x:x['offset'])
-        new_sen, start_p = '', 0
-        new_event_offsets = []
+        new_sen, new_event_offsets, start_p = '', [], 0
         for event in all_events:
             new_sen += sentence[start_p:event['offset']]
+            e_s, e_e = (e1s, e1e) if event['cluster'] == 1 else (e2s, e2e)
             new_event_offsets.append([
-                len(new_sen), len(new_sen) + (len(e1s) if event['cluster'] == 1 else len(e2s)) + len(event['trigger'])
+                len(new_sen), len(new_sen) + len(e_s) + len(event['trigger'])
             ])
-            new_sen += (e1s + event['trigger'] + e1e) if event['cluster'] == 1 else (e2s + event['trigger'] + e2e)
+            new_sen += (e_s + event['trigger'] + e_e)
             start_p = event['offset'] + len(event['trigger'])
         new_sen += sentence[start_p:]
         for event, [s_offset, _] in zip(all_events, new_event_offsets): # check
@@ -180,11 +179,13 @@ def create_new_sent(
             assert new_sen[s_offset:s_offset+len(event_span)] == event_span
         return new_sen, new_event_offsets
     
-    e1s, e1e, e2s, e2e = special_token_dict['e1s_token'], special_token_dict['e1e_token'], special_token_dict['e2s_token'], special_token_dict['e2e_token']
+    e1s, e1e = special_token_dict['e1s_token'], special_token_dict['e1e_token']
+    e2s, e2e = special_token_dict['e2s_token'], special_token_dict['e2e_token']
     # choose event sentences to control the total length
     chosen_sent_idxs = choose_sent_idxs(cluster1_events, cluster2_events, sentences_lengths, max_length)
     if not chosen_sent_idxs:
         return None
+    # match chosen sentences with corresponding events
     sentence_event = {}
     trigger1, trigger2 = [], []
     for e in cluster1_events:
@@ -211,17 +212,24 @@ def create_new_sent(
             }
         else:
             sentence_event[e['sent_idx']]['cluster2_events'].append(e)
+    for sent_idx in chosen_sent_idxs:
+        if sent_idx not in sentence_event:
+            sentence_event[sent_idx] = {
+                'text': sentences[sent_idx]['text'], 
+                'cluster1_events': [], 
+                'cluster2_events': []
+            }
     # select word with the largest number in the cluster as representative trigger
     trigger1, trigger2 = Counter(trigger1).most_common()[0][0], Counter(trigger2).most_common()[0][0]
     sentence_event = sorted(sentence_event.items(), key=lambda x:x[0])
     document, event_s_e_offsets = '', []
     for _, s_e in sentence_event:
         new_sen, new_event_offsets = get_sen_with_events(s_e['text'], s_e['cluster1_events'], s_e['cluster2_events'])
-        event_s_e_offsets += [[s+len(document), e+len(document)] for s, e in new_event_offsets]
+        event_s_e_offsets += [[s + len(document), e + len(document)] for s, e in new_event_offsets]
         document += new_sen + ' '
     
     document_length = len(tokenizer(document).tokens())
-    assert document_length <= max_length, f'max length value should >= {document_length}. Now is {max_length}.'
+    assert document_length <= max_length, f'segment length {document_length} > max length {max_length}.'
     return {
         'sent': document, 
         'event_s_e_offset': event_s_e_offsets, 
@@ -235,12 +243,13 @@ def get_prompt(
     tokenizer
     ):
     '''
-    create different type prompts
+    create prompt
 
     - prompt_type: \n
         'hb_d', 'd_hb'  # hard base template \n
         'hq_d', 'd_hq'  # hard question-style template \n
         'sb_d', 'd_sb'  # soft base template
+    - source_sent: context
     '''
 
     e1s_token, e1e_token = special_token_dict['e1s_token'], special_token_dict['e1e_token']
