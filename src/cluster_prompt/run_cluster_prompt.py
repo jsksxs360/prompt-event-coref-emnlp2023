@@ -290,6 +290,8 @@ if __name__ == '__main__':
     # Testing
     save_weights = [file for file in os.listdir(args.output_dir) if file.endswith('.bin')]
     if args.do_test:
+        # Set seed
+        seed_everything(args.seed)
         test_dataset = KBPCorefTiny(
             args.test_file, 
             args.test_file_with_cos, 
