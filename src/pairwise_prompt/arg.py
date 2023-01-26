@@ -22,6 +22,9 @@ def parse_args():
     )
     parser.add_argument("--max_seq_length", default=512, type=int, required=True)
     parser.add_argument("--prompt_type", type=str, required=True)
+    parser.add_argument("--matching_style", default="none", type=str, required=True, 
+        help="incorporate event matching representations"
+    )
     
     parser.add_argument("--do_train", action="store_true", help="Whether to run training.")
     parser.add_argument("--do_test", action="store_true", help="Whether to run eval on the test set.")
@@ -33,7 +36,7 @@ def parse_args():
     )
     parser.add_argument("--longformer_global_att", default=None, type=str,
         help="global attention of longformer.", 
-        choices=['no', 'mask', 'event', 'mask&event']
+        choices=['no', 'mask', 'event', 'mask_event']
     )
     
     parser.add_argument("--learning_rate", default=1e-5, type=float, help="The initial learning rate for Adam.")

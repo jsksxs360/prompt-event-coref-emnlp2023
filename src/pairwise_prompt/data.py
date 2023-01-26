@@ -271,34 +271,8 @@ def get_dataLoader(args, dataset, tokenizer, add_mark:str, collote_fn_type:str, 
 
     pos_id = tokenizer.convert_tokens_to_ids(verbalizer['COREF_TOKEN'])
     neg_id = tokenizer.convert_tokens_to_ids(verbalizer['NONCOREF_TOKEN'])
-
-    def collote_fn(batch_samples):
-        batch_sen, batch_mask_idx, batch_coref = [], [], []
-        for sample in batch_samples:
-            prompt_data = get_prompt(
-                prompt_type, special_token_dict, sample['sent'], 
-                sample['e1_trigger'], sample['e1_start'], sample['e1s_start'], sample['e1e_start'], 
-                sample['e2_trigger'], sample['e2_start'], sample['e2s_start'], sample['e2e_start'], 
-                tokenizer
-            )
-            batch_sen.append(prompt_data['prompt'])
-            batch_mask_idx.append(prompt_data['mask_idx'])
-            batch_coref.append(sample['label'])
-        batch_inputs = tokenizer(
-            batch_sen, 
-            max_length=args.max_seq_length, 
-            padding=True, 
-            truncation=True, 
-            return_tensors="pt"
-        )
-        batch_label = [pos_id if coref == 1 else neg_id  for coref in batch_coref]
-        return {
-            'batch_inputs': batch_inputs, 
-            'batch_mask_idx': batch_mask_idx, 
-            'labels': batch_label
-        }
     
-    def collote_fn_longformer(batch_samples):
+    def collote_fn(batch_samples):
         batch_sen, batch_mask_idx, batch_event_idx, batch_coref = [], [], [], []
         for sample in batch_samples:
             prompt_data = get_prompt(
@@ -329,7 +303,7 @@ def get_dataLoader(args, dataset, tokenizer, add_mark:str, collote_fn_type:str, 
         }
     
     if collote_fn_type == 'normal':
-        select_collote_fn = collote_fn_longformer if add_mark == 'longformer' else collote_fn
+        select_collote_fn = collote_fn
     
     return DataLoader(
         dataset, 

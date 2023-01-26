@@ -1,8 +1,9 @@
-export OUTPUT_DIR=./longformer_sb_d_512_event_results/
+export OUTPUT_DIR=./longformer_sb_d_512_e_multi_cosine_results/
 
 python3 run_prompt.py \
     --output_dir=$OUTPUT_DIR \
     --prompt_type=sb_d \
+    --matching_style=multi_cosine \
     --model_type=longformer \
     --longformer_global_att=event \
     --model_checkpoint=../../PT_MODELS/allenai/longformer-large-4096/ \

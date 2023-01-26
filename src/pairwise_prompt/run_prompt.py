@@ -86,6 +86,8 @@ def test_loop(args, dataloader, dataset, model, neg_id, pos_id):
 
 def train(args, train_dataset, dev_dataset, model, tokenizer, add_mark, collote_fn_type, prompt_type, verbalizer):
     """ Train the model """
+    # Set seed
+    seed_everything(args.seed)
     train_dataloader = get_dataLoader(
         args, train_dataset, tokenizer, add_mark=add_mark, collote_fn_type=collote_fn_type, 
         prompt_type=prompt_type, verbalizer=verbalizer, shuffle=True
@@ -195,8 +197,7 @@ def predict(args, model, tokenizer,
     )
     prompt_text = prompt_data['prompt']
     mask_idx = prompt_data['mask_idx']
-    if add_mark == 'longformer':
-        event_idx = [prompt_data['e1s_idx'], prompt_data['e1e_idx'], prompt_data['e2s_idx'], prompt_data['e2e_idx']]
+    event_idx = [prompt_data['e1s_idx'], prompt_data['e1e_idx'], prompt_data['e2s_idx'], prompt_data['e2e_idx']]
     inputs = tokenizer(
         prompt_text, 
         max_length=args.max_seq_length, 
@@ -208,9 +209,6 @@ def predict(args, model, tokenizer,
         'batch_inputs': inputs, 
         'batch_mask_idx': [mask_idx], 
         'batch_event_idx': [event_idx]
-    } if add_mark == 'longformer' else {
-        'batch_inputs': inputs, 
-        'batch_mask_idx': [mask_idx]
     }
     pos_id = tokenizer.convert_tokens_to_ids(verbalizer['COREF_TOKEN'])
     neg_id = tokenizer.convert_tokens_to_ids(verbalizer['NONCOREF_TOKEN'])
@@ -275,6 +273,8 @@ if __name__ == '__main__':
                 tokenizer=tokenizer, 
                 max_length=args.max_seq_length - PROMPT_LENGTH[args.prompt_type]
             )
+        labels = [train_dataset[s_idx]['label'] for s_idx in range(len(train_dataset))]
+        logger.info(f"[Train] Coref: {labels.count(1)} non-Coref: {labels.count(0)}")
         dev_dataset = KBPCoref(
             args.dev_file, 
             add_mark=args.model_type, 
@@ -282,6 +282,8 @@ if __name__ == '__main__':
             tokenizer=tokenizer, 
             max_length=args.max_seq_length - PROMPT_LENGTH[args.prompt_type]
         )
+        labels = [dev_dataset[s_idx]['label'] for s_idx in range(len(dev_dataset))]
+        logger.info(f"[Dev] Coref: {labels.count(1)} non-Coref: {labels.count(0)}")
         train(args, train_dataset, dev_dataset, model, tokenizer, 
             add_mark=args.model_type, collote_fn_type='normal', prompt_type=args.prompt_type, verbalizer=verbalizer
         )
@@ -295,6 +297,8 @@ if __name__ == '__main__':
             tokenizer=tokenizer, 
             max_length=args.max_seq_length - PROMPT_LENGTH[args.prompt_type]
         )
+        labels = [test_dataset[s_idx]['label'] for s_idx in range(len(test_dataset))]
+        logger.info(f"[Test] Coref: {labels.count(1)} non-Coref: {labels.count(0)}")
         logger.info(f'loading trained weights from {args.output_dir} ...')
         test(args, test_dataset, model, tokenizer, save_weights, 
             add_mark=args.model_type, collote_fn_type='normal', prompt_type=args.prompt_type, verbalizer=verbalizer
