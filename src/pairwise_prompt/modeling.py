@@ -5,6 +5,7 @@ from torch.nn import CrossEntropyLoss
 from transformers import BertPreTrainedModel, BertModel
 from transformers import RobertaPreTrainedModel, RobertaModel
 from transformers import LongformerPreTrainedModel, LongformerModel
+from allennlp.modules.gated_sum import GatedSum
 from allennlp.modules.span_extractors import SelfAttentiveSpanExtractor
 from  ..tools import batched_index_select, BertOnlyMLMHead, RobertaLMHead, LongformerLMHead
 
@@ -26,18 +27,20 @@ class BertForPrompt(BertPreTrainedModel):
         self.matching_style = args.matching_style
         self.use_device = args.device
         if self.matching_style != 'none':
+            self.gate = GatedSum(input_dim=self.hidden_size)
             self.span_extractor = SelfAttentiveSpanExtractor(input_dim=self.hidden_size)
+            self.coref_cls = nn.Linear(self.hidden_size, 2)
             if self.matching_style == 'multi':
-                self.mapping = nn.Linear(2 * self.hidden_size, self.hidden_size)
+                self.match_transf = nn.Linear(3 * self.hidden_size, self.hidden_size)
             else:
                 self.cosine_space_dim, self.cosine_slices, self.tensor_factor = COSINE_SPACE_DIM, COSINE_SLICES, COSINE_FACTOR
                 self.cosine_mat_p = nn.Parameter(torch.rand((self.tensor_factor, self.cosine_slices), requires_grad=True))
                 self.cosine_mat_q = nn.Parameter(torch.rand((self.tensor_factor, self.cosine_space_dim), requires_grad=True))
                 self.cosine_ffnn = nn.Linear(self.hidden_size, self.cosine_space_dim)
                 if self.matching_style == 'cosine':
-                    self.mapping = nn.Linear(self.hidden_size + self.cosine_slices, self.hidden_size)
+                    self.match_transf = nn.Linear(2 * self.hidden_size + self.cosine_slices, self.hidden_size)
                 elif self.matching_style == 'multi_cosine':
-                    self.mapping = nn.Linear(2 * self.hidden_size + self.cosine_slices, self.hidden_size)
+                    self.match_transf = nn.Linear(3 * self.hidden_size + self.cosine_slices, self.hidden_size)
         self.post_init()
     
     def _multi_cosine(self, batch_event_1_reps, batch_event_2_reps):
@@ -65,16 +68,18 @@ class BertForPrompt(BertPreTrainedModel):
     
     def _matching_func(self, batch_event_1_reps, batch_event_2_reps):
         if self.matching_style == 'multi':
-            batch_e1_e2_match = batch_event_1_reps * batch_event_2_reps
+            batch_e1_e2_multi = batch_event_1_reps * batch_event_2_reps
+            batch_e1_e2_match = torch.cat([batch_event_1_reps, batch_event_2_reps, batch_e1_e2_multi], dim=-1)
         elif self.matching_style == 'cosine':
-            batch_e1_e2_match = self._multi_cosine(batch_event_1_reps, batch_event_2_reps)
+            batch_multi_cosine = self._multi_cosine(batch_event_1_reps, batch_event_2_reps)
+            batch_e1_e2_match = torch.cat([batch_event_1_reps, batch_event_2_reps, batch_multi_cosine], dim=-1)
         elif self.matching_style == 'multi_cosine':
             batch_e1_e2_multi = batch_event_1_reps * batch_event_2_reps
             batch_multi_cosine = self._multi_cosine(batch_event_1_reps, batch_event_2_reps)
-            batch_e1_e2_match = torch.cat([batch_e1_e2_multi, batch_multi_cosine], dim=-1)
+            batch_e1_e2_match = torch.cat([batch_event_1_reps, batch_event_2_reps, batch_e1_e2_multi, batch_multi_cosine], dim=-1)
         return batch_e1_e2_match
 
-    def forward(self, batch_inputs, batch_mask_idx, batch_event_idx, labels=None):
+    def forward(self, batch_inputs, batch_mask_idx, batch_event_idx, batch_coref=None, labels=None):
         outputs = self.bert(**batch_inputs)
         sequence_output = outputs.last_hidden_state
         batch_mask_reps = batched_index_select(sequence_output, 1, batch_mask_idx.unsqueeze(-1)).squeeze(1)
@@ -88,13 +93,18 @@ class BertForPrompt(BertPreTrainedModel):
             batch_event_1_reps = self.span_extractor(sequence_output, batch_e1_idx).squeeze(dim=1)
             batch_event_2_reps = self.span_extractor(sequence_output, batch_e2_idx).squeeze(dim=1)
             batch_match_reps = self._matching_func(batch_event_1_reps, batch_event_2_reps)
-            batch_mask_reps = self.mapping(torch.cat([batch_mask_reps, batch_match_reps], dim=-1))
+            batch_match_reps = self.match_transf(batch_match_reps)
+            coref_logits = self.coref_cls(batch_match_reps)
+            batch_mask_reps = self.gate(batch_mask_reps, batch_match_reps) # gated sum
         logits = self.cls(batch_mask_reps)
 
         loss = None
         if labels is not None:
             loss_fct = CrossEntropyLoss()
             loss = loss_fct(logits, labels)
+            if self.matching_style != 'none':
+                match_loss = loss_fct(coref_logits, batch_coref)
+                loss = torch.log(1 + loss) + torch.log(1 + match_loss)
         return loss, logits
 
 class RobertaForPrompt(RobertaPreTrainedModel):
@@ -106,18 +116,20 @@ class RobertaForPrompt(RobertaPreTrainedModel):
         self.matching_style = args.matching_style
         self.use_device = args.device
         if self.matching_style != 'none':
+            self.gate = GatedSum(input_dim=self.hidden_size)
             self.span_extractor = SelfAttentiveSpanExtractor(input_dim=self.hidden_size)
+            self.coref_cls = nn.Linear(self.hidden_size, 2)
             if self.matching_style == 'multi':
-                self.mapping = nn.Linear(2 * self.hidden_size, self.hidden_size)
+                self.match_transf = nn.Linear(3 * self.hidden_size, self.hidden_size)
             else:
                 self.cosine_space_dim, self.cosine_slices, self.tensor_factor = COSINE_SPACE_DIM, COSINE_SLICES, COSINE_FACTOR
                 self.cosine_mat_p = nn.Parameter(torch.rand((self.tensor_factor, self.cosine_slices), requires_grad=True))
                 self.cosine_mat_q = nn.Parameter(torch.rand((self.tensor_factor, self.cosine_space_dim), requires_grad=True))
                 self.cosine_ffnn = nn.Linear(self.hidden_size, self.cosine_space_dim)
                 if self.matching_style == 'cosine':
-                    self.mapping = nn.Linear(self.hidden_size + self.cosine_slices, self.hidden_size)
+                    self.match_transf = nn.Linear(2 * self.hidden_size + self.cosine_slices, self.hidden_size)
                 elif self.matching_style == 'multi_cosine':
-                    self.mapping = nn.Linear(2 * self.hidden_size + self.cosine_slices, self.hidden_size)
+                    self.match_transf = nn.Linear(3 * self.hidden_size + self.cosine_slices, self.hidden_size)
         self.update_keys_to_ignore(config, ["lm_head.decoder.weight"])
         self.post_init()
 
@@ -144,16 +156,18 @@ class RobertaForPrompt(RobertaPreTrainedModel):
     
     def _matching_func(self, batch_event_1_reps, batch_event_2_reps):
         if self.matching_style == 'multi':
-            batch_e1_e2_match = batch_event_1_reps * batch_event_2_reps
+            batch_e1_e2_multi = batch_event_1_reps * batch_event_2_reps
+            batch_e1_e2_match = torch.cat([batch_event_1_reps, batch_event_2_reps, batch_e1_e2_multi], dim=-1)
         elif self.matching_style == 'cosine':
-            batch_e1_e2_match = self._multi_cosine(batch_event_1_reps, batch_event_2_reps)
+            batch_multi_cosine = self._multi_cosine(batch_event_1_reps, batch_event_2_reps)
+            batch_e1_e2_match = torch.cat([batch_event_1_reps, batch_event_2_reps, batch_multi_cosine], dim=-1)
         elif self.matching_style == 'multi_cosine':
             batch_e1_e2_multi = batch_event_1_reps * batch_event_2_reps
             batch_multi_cosine = self._multi_cosine(batch_event_1_reps, batch_event_2_reps)
-            batch_e1_e2_match = torch.cat([batch_e1_e2_multi, batch_multi_cosine], dim=-1)
+            batch_e1_e2_match = torch.cat([batch_event_1_reps, batch_event_2_reps, batch_e1_e2_multi, batch_multi_cosine], dim=-1)
         return batch_e1_e2_match
 
-    def forward(self, batch_inputs, batch_mask_idx, batch_event_idx, labels=None):
+    def forward(self, batch_inputs, batch_mask_idx, batch_event_idx, batch_coref=None, labels=None):
         outputs = self.roberta(**batch_inputs)
         sequence_output = outputs.last_hidden_state
         batch_mask_reps = batched_index_select(sequence_output, 1, batch_mask_idx.unsqueeze(-1)).squeeze(1)
@@ -167,13 +181,18 @@ class RobertaForPrompt(RobertaPreTrainedModel):
             batch_event_1_reps = self.span_extractor(sequence_output, batch_e1_idx).squeeze(dim=1)
             batch_event_2_reps = self.span_extractor(sequence_output, batch_e2_idx).squeeze(dim=1)
             batch_match_reps = self._matching_func(batch_event_1_reps, batch_event_2_reps)
-            batch_mask_reps = self.mapping(torch.cat([batch_mask_reps, batch_match_reps], dim=-1))
+            batch_match_reps = self.match_transf(batch_match_reps)
+            coref_logits = self.coref_cls(batch_match_reps)
+            batch_mask_reps = self.gate(batch_mask_reps, batch_match_reps) # gated sum
         logits = self.lm_head(batch_mask_reps)
 
         loss = None
         if labels is not None:
             loss_fct = CrossEntropyLoss()
             loss = loss_fct(logits, labels)
+            if self.matching_style != 'none':
+                match_loss = loss_fct(coref_logits, batch_coref)
+                loss = torch.log(1 + loss) + torch.log(1 + match_loss)
         return loss, logits
 
 class LongformerForPrompt(LongformerPreTrainedModel):
@@ -186,18 +205,20 @@ class LongformerForPrompt(LongformerPreTrainedModel):
         self.matching_style = args.matching_style
         self.use_device = args.device
         if self.matching_style != 'none':
+            self.gate = GatedSum(input_dim=self.hidden_size)
             self.span_extractor = SelfAttentiveSpanExtractor(input_dim=self.hidden_size)
+            self.coref_cls = nn.Linear(self.hidden_size, 2)
             if self.matching_style == 'multi':
-                self.mapping = nn.Linear(2 * self.hidden_size, self.hidden_size)
+                self.match_transf = nn.Linear(3 * self.hidden_size, self.hidden_size)
             else:
                 self.cosine_space_dim, self.cosine_slices, self.tensor_factor = COSINE_SPACE_DIM, COSINE_SLICES, COSINE_FACTOR
                 self.cosine_mat_p = nn.Parameter(torch.rand((self.tensor_factor, self.cosine_slices), requires_grad=True))
                 self.cosine_mat_q = nn.Parameter(torch.rand((self.tensor_factor, self.cosine_space_dim), requires_grad=True))
                 self.cosine_ffnn = nn.Linear(self.hidden_size, self.cosine_space_dim)
                 if self.matching_style == 'cosine':
-                    self.mapping = nn.Linear(self.hidden_size + self.cosine_slices, self.hidden_size)
+                    self.match_transf = nn.Linear(2 * self.hidden_size + self.cosine_slices, self.hidden_size)
                 elif self.matching_style == 'multi_cosine':
-                    self.mapping = nn.Linear(2 * self.hidden_size + self.cosine_slices, self.hidden_size)
+                    self.match_transf = nn.Linear(3 * self.hidden_size + self.cosine_slices, self.hidden_size)
         self.post_init()
 
     def _multi_cosine(self, batch_event_1_reps, batch_event_2_reps):
@@ -225,16 +246,18 @@ class LongformerForPrompt(LongformerPreTrainedModel):
     
     def _matching_func(self, batch_event_1_reps, batch_event_2_reps):
         if self.matching_style == 'multi':
-            batch_e1_e2_match = batch_event_1_reps * batch_event_2_reps
+            batch_e1_e2_multi = batch_event_1_reps * batch_event_2_reps
+            batch_e1_e2_match = torch.cat([batch_event_1_reps, batch_event_2_reps, batch_e1_e2_multi], dim=-1)
         elif self.matching_style == 'cosine':
-            batch_e1_e2_match = self._multi_cosine(batch_event_1_reps, batch_event_2_reps)
+            batch_multi_cosine = self._multi_cosine(batch_event_1_reps, batch_event_2_reps)
+            batch_e1_e2_match = torch.cat([batch_event_1_reps, batch_event_2_reps, batch_multi_cosine], dim=-1)
         elif self.matching_style == 'multi_cosine':
             batch_e1_e2_multi = batch_event_1_reps * batch_event_2_reps
             batch_multi_cosine = self._multi_cosine(batch_event_1_reps, batch_event_2_reps)
-            batch_e1_e2_match = torch.cat([batch_e1_e2_multi, batch_multi_cosine], dim=-1)
+            batch_e1_e2_match = torch.cat([batch_event_1_reps, batch_event_2_reps, batch_e1_e2_multi, batch_multi_cosine], dim=-1)
         return batch_e1_e2_match
 
-    def forward(self, batch_inputs, batch_mask_idx, batch_event_idx, labels=None):
+    def forward(self, batch_inputs, batch_mask_idx, batch_event_idx, batch_coref=None, labels=None):
         if self.global_att != 'no': # global attention on mask token
             global_attention_mask = torch.zeros_like(batch_inputs['input_ids'])
             if 'mask' in self.global_att:
@@ -258,11 +281,16 @@ class LongformerForPrompt(LongformerPreTrainedModel):
             batch_event_1_reps = self.span_extractor(sequence_output, batch_e1_idx).squeeze(dim=1)
             batch_event_2_reps = self.span_extractor(sequence_output, batch_e2_idx).squeeze(dim=1)
             batch_match_reps = self._matching_func(batch_event_1_reps, batch_event_2_reps)
-            batch_mask_reps = self.mapping(torch.cat([batch_mask_reps, batch_match_reps], dim=-1))
+            batch_match_reps = self.match_transf(batch_match_reps)
+            coref_logits = self.coref_cls(batch_match_reps)
+            batch_mask_reps = self.gate(batch_mask_reps, batch_match_reps) # gated sum
         logits = self.lm_head(batch_mask_reps)
 
         loss = None
         if labels is not None:
             loss_fct = CrossEntropyLoss()
             loss = loss_fct(logits, labels)
+            if self.matching_style != 'none':
+                match_loss = loss_fct(coref_logits, batch_coref)
+                loss = torch.log(1 + loss) + torch.log(1 + match_loss)
         return loss, logits

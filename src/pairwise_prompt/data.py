@@ -80,13 +80,15 @@ class KBPCoref(Dataset):
                             'sent': new_event_sent['new_sent'], 
                             'e1_offset': event_1['start'], # event1
                             'e1_trigger': new_event_sent['e1_trigger'], 
-                            'e1_subtype': event_1['subtype'], 
+                            'e1_subtype': subtype2id.get(event_1['subtype'], 0), # 0 - 'other'
+                            'e1_subtype_str': event_1['subtype'] if event_1['subtype'] in SUBTYPES else 'normal', 
                             'e1_start': new_event_sent['e1_sent_start'], 
                             'e1s_start': new_event_sent['e1s_sent_start'], 
                             'e1e_start': new_event_sent['e1e_sent_start'], 
                             'e2_offset': event_2['start'], # event2
                             'e2_trigger': new_event_sent['e2_trigger'], 
-                            'e2_subtype': event_2['subtype'], 
+                            'e2_subtype': subtype2id.get(event_2['subtype'], 0), # 0 - 'other'
+                            'e2_subtype_str': event_2['subtype'] if event_2['subtype'] in SUBTYPES else 'normal', 
                             'e2_start': new_event_sent['e2_sent_start'], 
                             'e2s_start': new_event_sent['e2s_sent_start'], 
                             'e2e_start': new_event_sent['e2e_sent_start'], 
@@ -176,13 +178,15 @@ class KBPCorefTiny(Dataset):
                                     'sent': new_event_sent['new_sent'], 
                                     'e1_offset': event_1['start'], # event1
                                     'e1_trigger': new_event_sent['e1_trigger'], 
-                                    'e1_subtype': event_1['subtype'], 
+                                    'e1_subtype': subtype2id.get(event_1['subtype'], 0), # 0 - 'other'
+                                    'e1_subtype_str': event_1['subtype'] if event_1['subtype'] in SUBTYPES else 'normal', 
                                     'e1_start': new_event_sent['e1_sent_start'], 
                                     'e1s_start': new_event_sent['e1s_sent_start'], 
                                     'e1e_start': new_event_sent['e1e_sent_start'], 
                                     'e2_offset': event_2['start'], # event2
                                     'e2_trigger': new_event_sent['e2_trigger'], 
-                                    'e2_subtype': event_2['subtype'], 
+                                    'e2_subtype': subtype2id.get(event_2['subtype'], 0), # 0 - 'other'
+                                    'e2_subtype_str': event_2['subtype'] if event_2['subtype'] in SUBTYPES else 'normal', 
                                     'e2_start': new_event_sent['e2_sent_start'], 
                                     'e2s_start': new_event_sent['e2s_sent_start'], 
                                     'e2e_start': new_event_sent['e2e_sent_start'], 
@@ -213,13 +217,15 @@ class KBPCorefTiny(Dataset):
                                     'sent': new_event_sent['new_sent'], 
                                     'e1_offset': event_1['start'], # event1
                                     'e1_trigger': new_event_sent['e1_trigger'], 
-                                    'e1_subtype': event_1['subtype'], 
+                                    'e1_subtype': subtype2id.get(event_1['subtype'], 0), # 0 - 'other'
+                                    'e1_subtype_str': event_1['subtype'] if event_1['subtype'] in SUBTYPES else 'normal', 
                                     'e1_start': new_event_sent['e1_sent_start'], 
                                     'e1s_start': new_event_sent['e1s_sent_start'], 
                                     'e1e_start': new_event_sent['e1e_sent_start'], 
                                     'e2_offset': event_2['start'], # event2
                                     'e2_trigger': new_event_sent['e2_trigger'], 
-                                    'e2_subtype': event_2['subtype'], 
+                                    'e2_subtype': subtype2id.get(event_2['subtype'], 0), # 0 - 'other'
+                                    'e2_subtype_str': event_2['subtype'] if event_2['subtype'] in SUBTYPES else 'normal', 
                                     'e2_start': new_event_sent['e2_sent_start'], 
                                     'e2s_start': new_event_sent['e2s_sent_start'], 
                                     'e2e_start': new_event_sent['e2e_sent_start'], 
@@ -242,13 +248,15 @@ class KBPCorefTiny(Dataset):
                                 'sent': new_event_sent['new_sent'], 
                                 'e1_offset': event_1['start'], # event1
                                 'e1_trigger': new_event_sent['e1_trigger'], 
-                                'e1_subtype': event_1['subtype'], 
+                                'e1_subtype': subtype2id.get(event_1['subtype'], 0), # 0 - 'other'
+                                'e1_subtype_str': event_1['subtype'] if event_1['subtype'] in SUBTYPES else 'normal', 
                                 'e1_start': new_event_sent['e1_sent_start'], 
                                 'e1s_start': new_event_sent['e1s_sent_start'], 
                                 'e1e_start': new_event_sent['e1e_sent_start'], 
                                 'e2_offset': event_2['start'], # event2
                                 'e2_trigger': new_event_sent['e2_trigger'], 
-                                'e2_subtype': event_2['subtype'], 
+                                'e2_subtype': subtype2id.get(event_2['subtype'], 0), # 0 - 'other'
+                                'e2_subtype_str': event_2['subtype'] if event_2['subtype'] in SUBTYPES else 'normal', 
                                 'e2_start': new_event_sent['e2_sent_start'], 
                                 'e2s_start': new_event_sent['e2s_sent_start'], 
                                 'e2e_start': new_event_sent['e2e_sent_start'], 
@@ -271,7 +279,7 @@ def get_dataLoader(args, dataset, tokenizer, add_mark:str, collote_fn_type:str, 
 
     pos_id = tokenizer.convert_tokens_to_ids(verbalizer['COREF_TOKEN'])
     neg_id = tokenizer.convert_tokens_to_ids(verbalizer['NONCOREF_TOKEN'])
-    
+
     def collote_fn(batch_samples):
         batch_sen, batch_mask_idx, batch_event_idx, batch_coref = [], [], [], []
         for sample in batch_samples:
@@ -299,6 +307,7 @@ def get_dataLoader(args, dataset, tokenizer, add_mark:str, collote_fn_type:str, 
             'batch_inputs': batch_inputs, 
             'batch_mask_idx': batch_mask_idx, 
             'batch_event_idx': batch_event_idx, 
+            'batch_coref': batch_coref, 
             'labels': batch_label
         }
     
@@ -364,7 +373,7 @@ if __name__ == '__main__':
         pass
     
     verbalizer = {'COREF_TOKEN': 'same', 'NONCOREF_TOKEN': 'different'}
-    train_dataloader = get_dataLoader(args, train_small_data, tokenizer, add_mark='longformer', collote_fn_type='normal', prompt_type='d_sb', verbalizer=verbalizer, shuffle=True)
+    train_dataloader = get_dataLoader(args, train_small_data, tokenizer, add_mark='longformer', collote_fn_type='normal', prompt_type='sb_d', verbalizer=verbalizer, shuffle=True)
     batch_data = next(iter(train_dataloader))
     batch_X, batch_y = batch_data['batch_inputs'], batch_data['labels']
     print('batch_X shape:', {k: v.shape for k, v in batch_X.items()})
