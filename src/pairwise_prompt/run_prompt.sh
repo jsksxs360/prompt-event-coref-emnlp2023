@@ -12,10 +12,10 @@ python3 run_prompt.py \
     --dev_file=../../data/dev_filtered.json \
     --test_file=../../data/test_filtered.json \
     --train_data_type=tiny \
-    --neg_top_k=10 \
+    --neg_top_k=3 \
     --max_seq_length=512 \
     --learning_rate=1e-5 \
-    --num_train_epochs=20 \
+    --num_train_epochs=10 \
     --batch_size=4 \
     --do_train \
     --warmup_proportion=0. \
