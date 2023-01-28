@@ -44,6 +44,7 @@ class BertForPrompt(BertPreTrainedModel):
         self.post_init()
     
     def _multi_cosine(self, batch_event_1_reps, batch_event_2_reps):
+        # batch_event_1
         batch_event_1_reps = self.cosine_ffnn(batch_event_1_reps)
         batch_event_1_reps = batch_event_1_reps.unsqueeze(dim=1)
         batch_event_1_reps = self.cosine_mat_q * batch_event_1_reps
@@ -53,7 +54,7 @@ class BertForPrompt(BertPreTrainedModel):
         # vector normalization
         norms_1 = (batch_event_1_reps ** 2).sum(axis=-1, keepdims=True) ** 0.5
         batch_event_1_reps = batch_event_1_reps / norms_1
-        
+        # batch_event_2
         batch_event_2_reps = self.cosine_ffnn(batch_event_2_reps)
         batch_event_2_reps = batch_event_2_reps.unsqueeze(dim=1)
         batch_event_2_reps = self.cosine_mat_q * batch_event_2_reps
@@ -63,7 +64,6 @@ class BertForPrompt(BertPreTrainedModel):
         # vector normalization
         norms_2 = (batch_event_2_reps ** 2).sum(axis=-1, keepdims=True) ** 0.5
         batch_event_2_reps = batch_event_2_reps / norms_2
-
         return torch.sum(batch_event_1_reps * batch_event_2_reps, dim=-1)
     
     def _matching_func(self, batch_event_1_reps, batch_event_2_reps):
@@ -134,6 +134,7 @@ class RobertaForPrompt(RobertaPreTrainedModel):
         self.post_init()
 
     def _multi_cosine(self, batch_event_1_reps, batch_event_2_reps):
+        # batch_event_1
         batch_event_1_reps = self.cosine_ffnn(batch_event_1_reps)
         batch_event_1_reps = batch_event_1_reps.unsqueeze(dim=1)
         batch_event_1_reps = self.cosine_mat_q * batch_event_1_reps
@@ -143,7 +144,7 @@ class RobertaForPrompt(RobertaPreTrainedModel):
         # vector normalization
         norms_1 = (batch_event_1_reps ** 2).sum(axis=-1, keepdims=True) ** 0.5
         batch_event_1_reps = batch_event_1_reps / norms_1
-        
+        # batch_event_2
         batch_event_2_reps = self.cosine_ffnn(batch_event_2_reps)
         batch_event_2_reps = batch_event_2_reps.unsqueeze(dim=1)
         batch_event_2_reps = self.cosine_mat_q * batch_event_2_reps
@@ -153,6 +154,7 @@ class RobertaForPrompt(RobertaPreTrainedModel):
         # vector normalization
         norms_2 = (batch_event_2_reps ** 2).sum(axis=-1, keepdims=True) ** 0.5
         batch_event_2_reps = batch_event_2_reps / norms_2
+        return torch.sum(batch_event_1_reps * batch_event_2_reps, dim=-1)
     
     def _matching_func(self, batch_event_1_reps, batch_event_2_reps):
         if self.matching_style == 'multi':
@@ -222,6 +224,7 @@ class LongformerForPrompt(LongformerPreTrainedModel):
         self.post_init()
 
     def _multi_cosine(self, batch_event_1_reps, batch_event_2_reps):
+        # batch_event_1
         batch_event_1_reps = self.cosine_ffnn(batch_event_1_reps)
         batch_event_1_reps = batch_event_1_reps.unsqueeze(dim=1)
         batch_event_1_reps = self.cosine_mat_q * batch_event_1_reps
@@ -231,7 +234,7 @@ class LongformerForPrompt(LongformerPreTrainedModel):
         # vector normalization
         norms_1 = (batch_event_1_reps ** 2).sum(axis=-1, keepdims=True) ** 0.5
         batch_event_1_reps = batch_event_1_reps / norms_1
-        
+        # batch_event_2
         batch_event_2_reps = self.cosine_ffnn(batch_event_2_reps)
         batch_event_2_reps = batch_event_2_reps.unsqueeze(dim=1)
         batch_event_2_reps = self.cosine_mat_q * batch_event_2_reps
@@ -241,7 +244,6 @@ class LongformerForPrompt(LongformerPreTrainedModel):
         # vector normalization
         norms_2 = (batch_event_2_reps ** 2).sum(axis=-1, keepdims=True) ** 0.5
         batch_event_2_reps = batch_event_2_reps / norms_2
-
         return torch.sum(batch_event_1_reps * batch_event_2_reps, dim=-1)
     
     def _matching_func(self, batch_event_1_reps, batch_event_2_reps):
