@@ -198,30 +198,33 @@ def get_prompt(
 
     tmp_e1s_start, tmp_e1e_start, tmp_e2s_start, tmp_e2e_start = 0, 0, 0, 0
     if 'hb' in prompt_type: # hard base template
-        t = f'In this document, the {e1s_token} {e1_trigger} {e1e_token} event and the {e2s_token} {e2_trigger} {e2e_token} event refer to {mask_token} event. '
-        s1, s2, s3, s4, s5 = 'In this document, the ', f'{e1s_token} {e1_trigger} ', f'{e1e_token} event and the ', f'{e2s_token} {e2_trigger} ', f'{e2e_token} event refer to {mask_token} event. '
+        t = f'In this document, the {e1s_token}{e1_trigger}{e1e_token} event and the {e2s_token}{e2_trigger}{e2e_token} event refer to {mask_token} event. '
+        s1, s2, s3, s4, s5 = 'In this document, the ', f'{e1s_token}{e1_trigger}', f'{e1e_token} event and the ', f'{e2s_token}{e2_trigger}', f'{e2e_token} event refer to {mask_token} event. '
         tmp_e1s_start = len(s1)
         tmp_e1e_start = tmp_e1s_start + len(s2)
         tmp_e2s_start = tmp_e1e_start + len(s3)
         tmp_e2e_start = tmp_e2s_start + len(s4)
+        tmp_e1_start, tmp_e2_start = tmp_e1s_start + len(e1s_token), tmp_e2s_start + len(e2s_token)
         prompt = s1 + s2 + s3 + s4 + s5
         assert prompt == t
     elif 'hq' in prompt_type: # hard question-style template
-        t = f'In this document, the {e1s_token} {e1_trigger} {e1e_token} event and the {e2s_token} {e2_trigger} {e2e_token} event refer to the same event? {mask_token}. '
-        s1, s2, s3, s4, s5 = 'In this document, the ', f'{e1s_token} {e1_trigger} ', f'{e1e_token} event and the ', f'{e2s_token} {e2_trigger} ', f'{e2e_token} event refer to the same event? {mask_token}. '
+        t = f'In this document, the {e1s_token}{e1_trigger}{e1e_token} event and the {e2s_token}{e2_trigger}{e2e_token} event refer to the same event? {mask_token}. '
+        s1, s2, s3, s4, s5 = 'In this document, the ', f'{e1s_token}{e1_trigger}', f'{e1e_token} event and the ', f'{e2s_token}{e2_trigger}', f'{e2e_token} event refer to the same event? {mask_token}. '
         tmp_e1s_start = len(s1)
         tmp_e1e_start = tmp_e1s_start + len(s2)
         tmp_e2s_start = tmp_e1e_start + len(s3)
         tmp_e2e_start = tmp_e2s_start + len(s4)
+        tmp_e1_start, tmp_e2_start = tmp_e1s_start + len(e1s_token), tmp_e2s_start + len(e2s_token)
         prompt = s1 + s2 + s3 + s4 + s5
         assert prompt == t
     elif 'sb' in prompt_type: # soft base template
-        t = f'In this document, {l_token1} {e1s_token} {e1_trigger} {e1e_token} {l_token2} {l_token3} {e2s_token} {e2_trigger} {e2e_token} {l_token4} {l_token5} {mask_token} {l_token6}. '
-        s1, s2, s3, s4, s5 = f'In this document, {l_token1} ', f'{e1s_token} {e1_trigger} ', f'{e1e_token} {l_token2} {l_token3} ', f'{e2s_token} {e2_trigger} ', f'{e2e_token} {l_token4} {l_token5} {mask_token} {l_token6}. '
+        t = f'In this document, {l_token1} {e1s_token}{e1_trigger}{e1e_token} {l_token2} {l_token3} {e2s_token}{e2_trigger}{e2e_token} {l_token4} {l_token5} {mask_token} {l_token6}. '
+        s1, s2, s3, s4, s5 = f'In this document, {l_token1} ', f'{e1s_token}{e1_trigger}', f'{e1e_token} {l_token2} {l_token3} ', f'{e2s_token}{e2_trigger}', f'{e2e_token} {l_token4} {l_token5} {mask_token} {l_token6}. '
         tmp_e1s_start = len(s1)
         tmp_e1e_start = tmp_e1s_start + len(s2)
         tmp_e2s_start = tmp_e1e_start + len(s3)
         tmp_e2e_start = tmp_e2s_start + len(s4)
+        tmp_e1_start, tmp_e2_start = tmp_e1s_start + len(e1s_token), tmp_e2s_start + len(e2s_token)
         prompt = s1 + s2 + s3 + s4 + s5
         assert prompt == t
     
@@ -230,14 +233,17 @@ def get_prompt(
         e2_start, e2s_start, e2e_start = np.asarray([e2_start, e2s_start, e2e_start]) + np.full((3,), len(prompt))
         prompt += source_sent
     elif 'd_' in prompt_type: # document + template
-        tmp_e1s_start, tmp_e1e_start = np.asarray([tmp_e1s_start, tmp_e1e_start]) + np.full((2,), len(source_sent) + 1)
-        tmp_e2s_start, tmp_e2e_start = np.asarray([tmp_e2s_start, tmp_e2e_start]) + np.full((2,), len(source_sent) + 1)
+        tmp_e1_start, tmp_e1s_start, tmp_e1e_start = np.asarray([tmp_e1_start, tmp_e1s_start, tmp_e1e_start]) + np.full((3,), len(source_sent) + 1)
+        tmp_e2_start, tmp_e2s_start, tmp_e2e_start = np.asarray([tmp_e2_start, tmp_e2s_start, tmp_e2e_start]) + np.full((3,), len(source_sent) + 1)
         prompt = source_sent + ' ' + prompt
 
+    assert prompt[tmp_e1_start:tmp_e1_start + len(e1_trigger)] == e1_trigger
     assert prompt[tmp_e1s_start:tmp_e1s_start + len(e1s_token)] == e1s_token
     assert prompt[tmp_e1e_start:tmp_e1e_start + len(e1e_token)] == e1e_token
+    assert prompt[tmp_e2_start:tmp_e2_start + len(e2_trigger)] == e2_trigger
     assert prompt[tmp_e2s_start:tmp_e2s_start + len(e2s_token)] == e2s_token
     assert prompt[tmp_e2e_start:tmp_e2e_start + len(e2e_token)] == e2e_token
+
     assert prompt[e1_start:e1_start + len(e1_trigger)] == e1_trigger
     assert prompt[e1s_start:e1s_start + len(e1s_token)] == e1s_token
     assert prompt[e1e_start:e1e_start + len(e1e_token)] == e1e_token
@@ -249,23 +255,25 @@ def get_prompt(
     mask_idx = encoding.char_to_token(prompt.find(mask_token))
     e1_idx, e1s_idx, e1e_idx = encoding.char_to_token(e1_start), encoding.char_to_token(e1s_start), encoding.char_to_token(e1e_start)
     e2_idx, e2s_idx, e2e_idx = encoding.char_to_token(e2_start), encoding.char_to_token(e2s_start), encoding.char_to_token(e2e_start)
-    tmp_e1s_idx, tmp_e1e_idx = encoding.char_to_token(tmp_e1s_start), encoding.char_to_token(tmp_e1e_start)
-    tmp_e2s_idx, tmp_e2e_idx = encoding.char_to_token(tmp_e2s_start), encoding.char_to_token(tmp_e2e_start)
+    tmp_e1_idx, tmp_e1s_idx, tmp_e1e_idx = encoding.char_to_token(tmp_e1_start), encoding.char_to_token(tmp_e1s_start), encoding.char_to_token(tmp_e1e_start)
+    tmp_e2_idx, tmp_e2s_idx, tmp_e2e_idx = encoding.char_to_token(tmp_e2_start), encoding.char_to_token(tmp_e2s_start), encoding.char_to_token(tmp_e2e_start)
     assert None not in [
-        mask_idx, tmp_e1s_idx, tmp_e1e_idx, tmp_e2s_idx, tmp_e2e_idx, e1_idx, e1s_idx, e1e_idx, e2_idx, e2s_idx, e2e_idx
+        mask_idx, tmp_e1_idx, tmp_e1s_idx, tmp_e1e_idx, tmp_e2_idx, tmp_e2s_idx, tmp_e2e_idx, e1_idx, e1s_idx, e1e_idx, e2_idx, e2s_idx, e2e_idx
     ]
     
     return {
         'prompt': prompt, 
         'mask_idx': mask_idx, 
+        'tmp_e1_idx': tmp_e1_idx, 
         'tmp_e1s_idx': tmp_e1s_idx, 
         'tmp_e1e_idx': tmp_e1e_idx, 
+        'tmp_e2_idx': tmp_e2_idx, 
         'tmp_e2s_idx': tmp_e2s_idx, 
         'tmp_e2e_idx': tmp_e2e_idx, 
         'e1_idx': e1_idx, 
         'e1s_idx': e1s_idx, 
         'e1e_idx': e1e_idx, 
-        'e2_start': e2_idx, 
+        'e2_idx': e2_idx, 
         'e2s_idx': e2s_idx,
         'e2e_idx': e2e_idx
     }

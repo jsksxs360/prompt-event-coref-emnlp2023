@@ -272,7 +272,7 @@ class KBPCorefTiny(Dataset):
 
 def get_dataLoader(args, dataset, tokenizer, add_mark:str, collote_fn_type:str, prompt_type:str, verbalizer:dict, batch_size:int=None, shuffle:bool=False):
 
-    assert add_mark in ADD_MARK_TYPE and collote_fn_type in ['normal']
+    assert add_mark in ADD_MARK_TYPE and collote_fn_type in ['normal', 'with_mask']
     assert prompt_type in PROMPT_TYPE
     
     special_token_dict = BERT_SPECIAL_TOKEN_DICT if add_mark=='bert' else ROBERTA_SPECIAL_TOKEN_DICT
@@ -311,8 +311,61 @@ def get_dataLoader(args, dataset, tokenizer, add_mark:str, collote_fn_type:str, 
             'labels': batch_label
         }
     
+    def collote_fn_with_mask(batch_samples):
+        batch_sen, batch_mask_idx, batch_event_idx, batch_trigger_idx = [], [], [], []
+        batch_coref, batch_subtypes = [], []
+        for sample in batch_samples:
+            prompt_data = get_prompt(
+                prompt_type, special_token_dict, sample['sent'], 
+                sample['e1_trigger'], sample['e1_start'], sample['e1s_start'], sample['e1e_start'], 
+                sample['e2_trigger'], sample['e2_start'], sample['e2s_start'], sample['e2e_start'], 
+                tokenizer
+            )
+            batch_sen.append(prompt_data['prompt'])
+            batch_mask_idx.append(prompt_data['mask_idx'])
+            batch_event_idx.append([
+                prompt_data['e1s_idx'], prompt_data['e1e_idx'], prompt_data['e2s_idx'], prompt_data['e2e_idx']
+            ])
+            batch_trigger_idx.append([
+                [prompt_data['tmp_e1_idx'], prompt_data['tmp_e1e_idx']], 
+                [prompt_data['tmp_e2_idx'], prompt_data['tmp_e2e_idx']], 
+                [prompt_data['e1_idx'], prompt_data['e1e_idx']], 
+                [prompt_data['e2_idx'], prompt_data['e2e_idx']]
+            ])
+            batch_coref.append(sample['label'])
+            batch_subtypes.append([sample['e1_subtype'], sample['e2_subtype']])
+        batch_inputs = tokenizer(
+            batch_sen, 
+            max_length=args.max_seq_length, 
+            padding=True, 
+            truncation=True, 
+            return_tensors="pt"
+        )
+        batch_inputs_with_mask = tokenizer(
+            batch_sen, 
+            max_length=args.max_seq_length, 
+            padding=True, 
+            truncation=True, 
+            return_tensors="pt"
+        )
+        for b_idx in range(len(batch_coref)):
+            for trigger_s, trigger_e in batch_trigger_idx[b_idx]:
+                batch_inputs_with_mask['input_ids'][b_idx][trigger_s:trigger_e] = tokenizer.mask_token_id
+        batch_label = [pos_id if coref == 1 else neg_id  for coref in batch_coref]
+        return {
+            'batch_inputs': batch_inputs, 
+            'batch_inputs_with_mask': batch_inputs_with_mask, 
+            'batch_mask_idx': batch_mask_idx, 
+            'batch_event_idx': batch_event_idx, 
+            'batch_coref': batch_coref, 
+            'labels': batch_label, 
+            'subtypes': batch_subtypes
+        }
+    
     if collote_fn_type == 'normal':
         select_collote_fn = collote_fn
+    elif collote_fn_type == 'with_mask':
+        select_collote_fn = collote_fn_with_mask
     
     return DataLoader(
         dataset, 
@@ -373,6 +426,8 @@ if __name__ == '__main__':
         pass
     
     verbalizer = {'COREF_TOKEN': 'same', 'NONCOREF_TOKEN': 'different'}
+    # normal
+    print('=' * 20, 'normal')
     train_dataloader = get_dataLoader(args, train_small_data, tokenizer, add_mark='longformer', collote_fn_type='normal', prompt_type='sb_d', verbalizer=verbalizer, shuffle=True)
     batch_data = next(iter(train_dataloader))
     batch_X, batch_y = batch_data['batch_inputs'], batch_data['labels']
@@ -381,6 +436,23 @@ if __name__ == '__main__':
     print(batch_X)
     print(batch_y)
     print(tokenizer.decode(batch_X['input_ids'][0]))
+    print('Testing dataloader...')
+    batch_datas = iter(train_dataloader)
+    for step in tqdm(range(len(train_dataloader))):
+        next(batch_datas)
+    # with mask
+    print('=' * 20, 'with_mask')
+    train_dataloader = get_dataLoader(args, train_small_data, tokenizer, add_mark='longformer', collote_fn_type='with_mask', prompt_type='sb_d', verbalizer=verbalizer, shuffle=True)
+    batch_data = next(iter(train_dataloader))
+    batch_X, batch_X_with_mask, batch_y = batch_data['batch_inputs'], batch_data['batch_inputs_with_mask'], batch_data['labels']
+    print('batch_X shape:', {k: v.shape for k, v in batch_X.items()})
+    print('batch_X_with_mask shape:', {k: v.shape for k, v in batch_X_with_mask.items()})
+    print('batch_y shape:', len(batch_y))
+    print(batch_X)
+    print(batch_X_with_mask)
+    print(batch_y)
+    print(tokenizer.decode(batch_X['input_ids'][0]))
+    print(tokenizer.decode(batch_X_with_mask['input_ids'][0]))
     print('Testing dataloader...')
     batch_datas = iter(train_dataloader)
     for step in tqdm(range(len(train_dataloader))):
