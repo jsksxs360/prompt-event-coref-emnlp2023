@@ -12,7 +12,7 @@ import sys
 sys.path.append('../../')
 from src.tools import seed_everything, NpEncoder
 from src.pairwise_prompt.arg import parse_args
-from src.pairwise_prompt.data import KBPCoref, KBPCorefTiny, get_dataLoader
+from src.pairwise_prompt.data import KBPCoref, KBPCorefTiny, get_dataLoader, get_KBP_entities
 from src.pairwise_prompt.data import BERT_SPECIAL_TOKENS, ROBERTA_SPECIAL_TOKENS
 from src.pairwise_prompt.data import BERT_SPECIAL_TOKEN_DICT, ROBERTA_SPECIAL_TOKEN_DICT
 from src.pairwise_prompt.utils import create_new_sent, get_prompt
@@ -160,7 +160,7 @@ def test(args, test_dataset, model, tokenizer, save_weights:list, add_mark, coll
 
 def predict(args, model, tokenizer, 
     e1_start:int, e1_trigger:str, e2_start:int, e2_trigger:str, 
-    sents:list, sents_lens:list, context_k:int, context_max_length:int, 
+    sents:list, sents_lens:list, sents_entities:list, context_k:int, context_max_length:int, 
     add_mark, prompt_type, verbalizer):
 
     def find_event_sent(event_start, trigger, sent_list):
@@ -185,7 +185,7 @@ def predict(args, model, tokenizer,
     new_event_sent = create_new_sent(
         e1_sent_idx, e1_sent_start, e1_trigger, 
         e2_sent_idx, e2_sent_start, e2_trigger, 
-        sents, sents_lens, 
+        sents, sents_lens, sents_entities, 
         special_token_dict, context_k, context_max_length, tokenizer
     )
     # create prompt
@@ -257,6 +257,7 @@ if __name__ == '__main__':
         if args.train_data_type == 'normal':
             train_dataset = KBPCoref(
                 args.train_file, 
+                args.entity_file, 
                 add_mark=args.model_type, 
                 context_k=CONTEXT_K, 
                 tokenizer=tokenizer, 
@@ -266,6 +267,7 @@ if __name__ == '__main__':
             train_dataset = KBPCorefTiny(
                 args.train_file, 
                 args.train_file_with_cos, 
+                args.entity_file, 
                 pos_top_k=args.pos_top_k, 
                 neg_top_k=args.neg_top_k, 
                 add_mark=args.model_type, 
@@ -277,6 +279,7 @@ if __name__ == '__main__':
         logger.info(f"[Train] Coref: {labels.count(1)} non-Coref: {labels.count(0)}")
         dev_dataset = KBPCoref(
             args.dev_file, 
+            args.entity_file, 
             add_mark=args.model_type, 
             context_k=CONTEXT_K, 
             tokenizer=tokenizer, 
@@ -292,6 +295,7 @@ if __name__ == '__main__':
     if args.do_test:
         test_dataset = KBPCoref(
             args.test_file, 
+            args.entity_file, 
             add_mark=args.model_type, 
             context_k=CONTEXT_K, 
             tokenizer=tokenizer, 
@@ -307,6 +311,7 @@ if __name__ == '__main__':
     if args.do_predict:
         sent_dict = defaultdict(list) # {filename: [Sentence]}
         sent_len_dict = defaultdict(list) # {filename: [sentence length]}
+        kbp_entity_dict = get_KBP_entities(args.entity_file) # {filename: [entity list]}
         with open(args.test_file, 'rt', encoding='utf-8') as f:
             for line in f:
                 sample = json.loads(line.strip())
@@ -330,17 +335,16 @@ if __name__ == '__main__':
                     events_from_file = sample['pred_label']
                     sents = sent_dict[sample['doc_id']]
                     sent_lens = sent_len_dict[sample['doc_id']]
+                    sent_entities = kbp_entity_dict[sample['doc_id']]
                     preds, probs = [], []
                     for i in range(len(events_from_file) - 1):
                         for j in range(i + 1, len(events_from_file)):
                             e_i, e_j = events_from_file[i], events_from_file[j]
                             pred, prob = predict(args, model, tokenizer,
                                 e_i['start'], e_i['trigger'], e_j['start'], e_j['trigger'], 
-                                sents, sent_lens, CONTEXT_K, args.max_seq_length - PROMPT_LENGTH[args.prompt_type], 
+                                sents, sent_lens, sent_entities, CONTEXT_K, args.max_seq_length - PROMPT_LENGTH[args.prompt_type], 
                                 args.model_type, args.prompt_type, verbalizer
                             )
-                            # print(e_i['start'], e_i['trigger'], e_j['start'], e_j['trigger'])
-                            # print(pred, prob)
                             preds.append(pred)
                             probs.append(prob)
                     results.append({

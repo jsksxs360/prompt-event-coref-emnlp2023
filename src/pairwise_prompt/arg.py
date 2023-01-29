@@ -6,6 +6,7 @@ def parse_args():
     parser.add_argument("--output_dir", default=None, type=str, required=True,
         help="The output directory where the model checkpoints and predictions will be written.",
     )
+    parser.add_argument("--entity_file", default=None, type=str, required=True, help="The input recognized entity file.")
     parser.add_argument("--train_file", default=None, type=str, required=True, help="The input training file.")
     parser.add_argument("--dev_file", default=None, type=str, required=True, help="The input evaluation file.")
     parser.add_argument("--test_file", default=None, type=str, required=True, help="The input testing file.")

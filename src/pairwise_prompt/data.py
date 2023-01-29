@@ -1,3 +1,4 @@
+import collections
 from collections import defaultdict
 from torch.utils.data import Dataset, DataLoader
 import json
@@ -42,10 +43,24 @@ ROBERTA_SPECIAL_TOKEN_DICT = {
 }
 ADD_MARK_TYPE = ['bert', 'roberta', 'longformer']
 
+def get_KBP_entities(entity_file_path:str):
+    '''get entities in the KBP dataset
+    # Returns: 
+        - entity dictionary: {filename: [entity list]}
+    '''
+    entity_dic = collections.defaultdict(list)
+    with open(entity_file_path, 'rt', encoding='utf-8') as sents:
+        for line in sents:
+            doc_id, _, _, entities = line.strip().split('\t')
+            entity_list = set([entity for entity in json.loads(entities)])
+            entity_dic[doc_id].append(entity_list)
+    return entity_dic
+
 class KBPCoref(Dataset):
-    def __init__(self, data_file:str, add_mark:str, context_k:int, tokenizer, max_length:int):
+    def __init__(self, data_file:str, entity_file:str, add_mark:str, context_k:int, tokenizer, max_length:int):
         assert add_mark in ADD_MARK_TYPE and context_k > 0
         self.tokenizer = tokenizer
+        self.kbp_entity_dict = get_KBP_entities(entity_file)
         self.data = self.load_data(data_file, add_mark, context_k, max_length)
         
     def _get_event_cluster_id(self, event_id:str, clusters:list) -> str:
@@ -63,6 +78,8 @@ class KBPCoref(Dataset):
                 clusters = sample['clusters']
                 sentences = sample['sentences']
                 sentences_lengths = [len(self.tokenizer(sent['text']).tokens()) for sent in sentences]
+                sentences_entities = self.kbp_entity_dict[sample['doc_id']]
+                assert len(sentences) == len(sentences_entities)
                 events = sample['events']
                 for i in range(len(events) - 1):
                     for j in range(i + 1, len(events)):
@@ -72,7 +89,7 @@ class KBPCoref(Dataset):
                         new_event_sent = create_new_sent(
                             event_1['sent_idx'], event_1['sent_start'], event_1['trigger'], 
                             event_2['sent_idx'], event_2['sent_start'], event_2['trigger'], 
-                            sentences, sentences_lengths, 
+                            sentences, sentences_lengths, sentences_entities, 
                             special_token_dict, context_k, max_length, self.tokenizer
                         )
                         Data.append({
@@ -85,6 +102,7 @@ class KBPCoref(Dataset):
                             'e1_start': new_event_sent['e1_sent_start'], 
                             'e1s_start': new_event_sent['e1s_sent_start'], 
                             'e1e_start': new_event_sent['e1e_sent_start'], 
+                            'e1_entities': new_event_sent['e1_entities'], 
                             'e2_offset': event_2['start'], # event2
                             'e2_trigger': new_event_sent['e2_trigger'], 
                             'e2_subtype': subtype2id.get(event_2['subtype'], 0), # 0 - 'other'
@@ -92,6 +110,7 @@ class KBPCoref(Dataset):
                             'e2_start': new_event_sent['e2_sent_start'], 
                             'e2s_start': new_event_sent['e2s_sent_start'], 
                             'e2e_start': new_event_sent['e2e_sent_start'], 
+                            'e2_entities': new_event_sent['e2_entities'], 
                             'label': 1 if event_1_cluster_id == event_2_cluster_id else 0
                         })
         return Data
@@ -104,7 +123,7 @@ class KBPCoref(Dataset):
 
 class KBPCorefTiny(Dataset):
     
-    def __init__(self, data_file:str, data_file_with_cos:str, pos_top_k:int, neg_top_k:int, add_mark:str, context_k:int, tokenizer, max_length:int):
+    def __init__(self, data_file:str, data_file_with_cos:str, entity_file:str, pos_top_k:int, neg_top_k:int, add_mark:str, context_k:int, tokenizer, max_length:int):
         '''
         - data_file: source train data file
         - data_file_with_cos: train data file with event similarities
@@ -112,6 +131,7 @@ class KBPCorefTiny(Dataset):
         assert pos_top_k >= 0 and neg_top_k > 0
         assert add_mark in ADD_MARK_TYPE and context_k > 0
         self.tokenizer = tokenizer
+        self.kbp_entity_dict = get_KBP_entities(entity_file)
         self.data = self.load_data(data_file, data_file_with_cos, pos_top_k, neg_top_k, add_mark, context_k, max_length)
     
     def _get_event_cluster_id(self, event_id:str, clusters:list) -> str:
@@ -160,6 +180,8 @@ class KBPCorefTiny(Dataset):
                     clusters = sample['clusters']
                     sentences = sample['sentences']
                     sentences_lengths = [len(self.tokenizer(sent['text']).tokens()) for sent in sentences]
+                    sentences_entities = self.kbp_entity_dict[sample['doc_id']]
+                    assert len(sentences) == len(sentences_entities)
                     events_list, events_dict = sample['events'], {e['event_id']:e for e in sample['events']}
                     for i in range(len(events_list) - 1):
                         for j in range(i + 1, len(events_list)):
@@ -170,7 +192,7 @@ class KBPCorefTiny(Dataset):
                                 new_event_sent = create_new_sent(
                                     event_1['sent_idx'], event_1['sent_start'], event_1['trigger'], 
                                     event_2['sent_idx'], event_2['sent_start'], event_2['trigger'], 
-                                    sentences, sentences_lengths, 
+                                    sentences, sentences_lengths, sentences_entities, 
                                     special_token_dict, context_k, max_length, self.tokenizer
                                 )
                                 Data.append({
@@ -183,6 +205,7 @@ class KBPCorefTiny(Dataset):
                                     'e1_start': new_event_sent['e1_sent_start'], 
                                     'e1s_start': new_event_sent['e1s_sent_start'], 
                                     'e1e_start': new_event_sent['e1e_sent_start'], 
+                                    'e1_entities': new_event_sent['e1_entities'], 
                                     'e2_offset': event_2['start'], # event2
                                     'e2_trigger': new_event_sent['e2_trigger'], 
                                     'e2_subtype': subtype2id.get(event_2['subtype'], 0), # 0 - 'other'
@@ -190,6 +213,7 @@ class KBPCorefTiny(Dataset):
                                     'e2_start': new_event_sent['e2_sent_start'], 
                                     'e2s_start': new_event_sent['e2s_sent_start'], 
                                     'e2e_start': new_event_sent['e2e_sent_start'], 
+                                    'e2_entities': new_event_sent['e2_entities'], 
                                     'label': 1
                                 })
             for line in f_cos:
@@ -197,6 +221,8 @@ class KBPCorefTiny(Dataset):
                 clusters = sample['clusters']
                 sentences = sample['sentences']
                 sentences_lengths = [len(self.tokenizer(sent['text']).tokens()) for sent in sentences]
+                sentences_entities = self.kbp_entity_dict[sample['doc_id']]
+                assert len(sentences) == len(sentences_entities)
                 event_simi_dict = create_event_simi_dict(sample['event_pairs_id'], sample['event_pairs_cos'], clusters)
                 events_list, events_dict = sample['events'], {e['event_id']:e for e in sample['events']}
                 if pos_top_k > 0: # select hard positive samples
@@ -209,7 +235,7 @@ class KBPCorefTiny(Dataset):
                                 new_event_sent = create_new_sent(
                                     event_1['sent_idx'], event_1['sent_start'], event_1['trigger'], 
                                     event_2['sent_idx'], event_2['sent_start'], event_2['trigger'], 
-                                    sentences, sentences_lengths, 
+                                    sentences, sentences_lengths, sentences_entities, 
                                     special_token_dict, context_k, max_length, self.tokenizer
                                 )
                                 Data.append({
@@ -222,6 +248,7 @@ class KBPCorefTiny(Dataset):
                                     'e1_start': new_event_sent['e1_sent_start'], 
                                     'e1s_start': new_event_sent['e1s_sent_start'], 
                                     'e1e_start': new_event_sent['e1e_sent_start'], 
+                                    'e1_entities': new_event_sent['e1_entities'], 
                                     'e2_offset': event_2['start'], # event2
                                     'e2_trigger': new_event_sent['e2_trigger'], 
                                     'e2_subtype': subtype2id.get(event_2['subtype'], 0), # 0 - 'other'
@@ -229,6 +256,7 @@ class KBPCorefTiny(Dataset):
                                     'e2_start': new_event_sent['e2_sent_start'], 
                                     'e2s_start': new_event_sent['e2s_sent_start'], 
                                     'e2e_start': new_event_sent['e2e_sent_start'], 
+                                    'e2_entities': new_event_sent['e2_entities'], 
                                     'label': 1
                                 })
                 for i in range(len(events_list)):
@@ -240,7 +268,7 @@ class KBPCorefTiny(Dataset):
                             new_event_sent = create_new_sent(
                                 event_1['sent_idx'], event_1['sent_start'], event_1['trigger'], 
                                 event_2['sent_idx'], event_2['sent_start'], event_2['trigger'], 
-                                sentences, sentences_lengths, 
+                                sentences, sentences_lengths, sentences_entities, 
                                 special_token_dict, context_k, max_length, self.tokenizer
                             )
                             Data.append({
@@ -253,6 +281,7 @@ class KBPCorefTiny(Dataset):
                                 'e1_start': new_event_sent['e1_sent_start'], 
                                 'e1s_start': new_event_sent['e1s_sent_start'], 
                                 'e1e_start': new_event_sent['e1e_sent_start'], 
+                                'e1_entities': new_event_sent['e1_entities'], 
                                 'e2_offset': event_2['start'], # event2
                                 'e2_trigger': new_event_sent['e2_trigger'], 
                                 'e2_subtype': subtype2id.get(event_2['subtype'], 0), # 0 - 'other'
@@ -260,6 +289,7 @@ class KBPCorefTiny(Dataset):
                                 'e2_start': new_event_sent['e2_sent_start'], 
                                 'e2s_start': new_event_sent['e2s_sent_start'], 
                                 'e2e_start': new_event_sent['e2e_sent_start'], 
+                                'e2_entities': new_event_sent['e2_entities'], 
                                 'label': 0
                             })
         return Data
@@ -403,7 +433,7 @@ if __name__ == '__main__':
     tokenizer.add_special_tokens(special_tokens_dict)
     assert tokenizer.additional_special_tokens == special_start_end_tokens
 
-    # train_data = KBPCoref('../../data/train_filtered.json', add_mark='longformer', context_k=2, tokenizer=tokenizer, max_length=482)
+    # train_data = KBPCoref('../../data/train_filtered.json', '../../data/kbp_sent_entity.txt', add_mark='longformer', context_k=2, tokenizer=tokenizer, max_length=482)
     # print_data_statistic('../../data/train_filtered.json')
     # print(len(train_data))
     # labels = [train_data[s_idx]['label'] for s_idx in range(len(train_data))]
@@ -413,7 +443,7 @@ if __name__ == '__main__':
     #     print(next(train_data))
 
     train_small_data = KBPCorefTiny(
-        '../../data/train_filtered.json', '../../data/train_filtered_with_cos.json', 
+        '../../data/train_filtered.json', '../../data/train_filtered_with_cos.json', '../../data/kbp_sent_entity.txt', 
         pos_top_k=0, neg_top_k=10, add_mark='longformer', context_k=2, tokenizer=tokenizer, max_length=512-40
     )
     print_data_statistic('../../data/train_filtered_with_cos.json')

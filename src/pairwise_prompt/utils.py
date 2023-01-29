@@ -1,9 +1,17 @@
 import numpy as np
 
+def findall(p, s):
+    '''yields all the positions of
+    the pattern p in the string s.'''
+    i = s.find(p)
+    while i != -1:
+        yield i
+        i = s.find(p, i+1)
+
 def create_new_sent(
     sent1_idx:int, e1_sent_start:int, e1_trigger:str, 
     sent2_idx:int, e2_sent_start:int, e2_trigger:str, 
-    sents:list, sents_lens:list, 
+    sents:list, sents_lens:list, sents_entities:list, 
     special_token_dict:dict, context_k:int, max_length:int, tokenizer
     ):
     '''
@@ -35,6 +43,9 @@ def create_new_sent(
     if sent1_idx == sent2_idx: # two events in the same sentence
         assert e1_sent_start < e2_sent_start
         sent_text = sents[sent1_idx]['text']
+        event_entities = sents_entities[sent1_idx]
+        for ent in event_entities:
+            assert ent in sent_text
         total_length = sents_lens[sent1_idx] + 8
         before, middle, next = sent_text[:e1_sent_start], sent_text[e1_sent_start + len(e1_trigger):e2_sent_start], sent_text[e2_sent_start + len(e2_trigger):]
         new_sent_before, new_sent_middle, new_sent_next = f'{before}{e1s}', f'{e1e}{middle}{e2s}', f'{e2e}{next}'
@@ -58,6 +69,11 @@ def create_new_sent(
         e2_new_sent_start = len(new_sent_before) + len(e1_trigger) + len(new_sent_middle)
         e2s_new_sent_start = e2_new_sent_start - len(e2s)
         e2e_new_sent_start = e2_new_sent_start + len(e2_trigger)
+        event_entities = []
+        for entity in event_entities:
+            for offset in findall(entity, new_sent):
+                event_entities.append({'offset': offset, 'text': entity})
+        event_entities.sort(key=lambda x:x['offset'])
         
         assert new_sent[e1_new_sent_start:e1_new_sent_start + len(e1_trigger)] == e1_trigger
         assert new_sent[e1s_new_sent_start:e1s_new_sent_start + len(e1s)] == e1s
@@ -65,20 +81,30 @@ def create_new_sent(
         assert new_sent[e2_new_sent_start:e2_new_sent_start + len(e2_trigger)] == e2_trigger
         assert new_sent[e2s_new_sent_start:e2s_new_sent_start + len(e2s)] == e2s
         assert new_sent[e2e_new_sent_start:e2e_new_sent_start + len(e2e)] == e2e
+        for entity in event_entities:
+            assert new_sent[entity['offset']:entity['offset'] + len(entity['text'])] == entity['text']
         return {
             'new_sent': new_sent, 
             'e1_trigger': e1_trigger, 
             'e1_sent_start': e1_new_sent_start, 
             'e1s_sent_start': e1s_new_sent_start, 
             'e1e_sent_start': e1e_new_sent_start, 
+            'e1_entities': event_entities if event_entities else [{'offset': e1_new_sent_start, 'text': e1_trigger}], 
             'e2_trigger': e2_trigger, 
             'e2_sent_start': e2_new_sent_start, 
             'e2s_sent_start': e2s_new_sent_start, 
-            'e2e_sent_start': e2e_new_sent_start
+            'e2e_sent_start': e2e_new_sent_start, 
+            'e2_entities': event_entities if event_entities else [{'offset': e2_new_sent_start, 'text': e2_trigger}]
         }
     else: # events in different sentence
-        before_1, next_1 = sents[sent1_idx]['text'][:e1_sent_start], sents[sent1_idx]['text'][e1_sent_start + len(e1_trigger):]
-        before_2, next_2 = sents[sent2_idx]['text'][:e2_sent_start], sents[sent2_idx]['text'][e2_sent_start + len(e2_trigger):]
+        sent1_text, sent2_text = sents[sent1_idx]['text'], sents[sent2_idx]['text']
+        event1_entities, event2_entities = sents_entities[sent1_idx], sents_entities[sent2_idx]
+        for ent in event1_entities:
+            assert ent in sent1_text
+        for ent in event2_entities:
+            assert ent in sent2_text
+        before_1, next_1 = sent1_text[:e1_sent_start], sent1_text[e1_sent_start + len(e1_trigger):]
+        before_2, next_2 = sent2_text[:e2_sent_start], sent2_text[e2_sent_start + len(e2_trigger):]
         total_length = sents_lens[sent1_idx] + sents_lens[sent2_idx] + 8
         if total_length > max_length:
             span_length = (max_length - 80) // 4
@@ -120,6 +146,15 @@ def create_new_sent(
                 e2_new_sent_start += len(new_sent1) + 1
                 e2s_new_sent_start += len(new_sent1) + 1
                 e2e_new_sent_start += len(new_sent1) + 1
+                e1_entities, e2_entities = [], []
+                for entity in event1_entities:
+                    for offset in findall(entity, final_new_sent):
+                        e1_entities.append({'offset': offset, 'text': entity})
+                e1_entities.sort(key=lambda x:x['offset'])
+                for entity in event2_entities:
+                    for offset in findall(entity, final_new_sent):
+                        e2_entities.append({'offset': offset, 'text': entity})
+                e2_entities.sort(key=lambda x:x['offset'])
                 
                 assert final_new_sent[e1_new_sent_start:e1_new_sent_start + len(e1_trigger)] == e1_trigger
                 assert final_new_sent[e1s_new_sent_start:e1s_new_sent_start + len(e1s)] == e1s
@@ -127,16 +162,22 @@ def create_new_sent(
                 assert final_new_sent[e2_new_sent_start:e2_new_sent_start + len(e2_trigger)] == e2_trigger
                 assert final_new_sent[e2s_new_sent_start:e2s_new_sent_start + len(e2s)] == e2s
                 assert final_new_sent[e2e_new_sent_start:e2e_new_sent_start + len(e2e)] == e2e
+                for entity in e1_entities:
+                    assert final_new_sent[entity['offset']:entity['offset'] + len(entity['text'])] == entity['text']
+                for entity in e2_entities:
+                    assert final_new_sent[entity['offset']:entity['offset'] + len(entity['text'])] == entity['text']
                 return {
                     'new_sent': final_new_sent, 
                     'e1_trigger': e1_trigger, 
                     'e1_sent_start': e1_new_sent_start, 
                     'e1s_sent_start': e1s_new_sent_start, 
                     'e1e_sent_start': e1e_new_sent_start, 
+                    'e1_entities': e1_entities if e1_entities else [{'offset': e1_new_sent_start, 'text': e1_trigger}], 
                     'e2_trigger': e2_trigger, 
                     'e2_sent_start': e2_new_sent_start, 
                     'e2s_sent_start': e2s_new_sent_start, 
-                    'e2e_sent_start': e2e_new_sent_start
+                    'e2e_sent_start': e2e_new_sent_start, 
+                    'e2_entities': e2_entities if e2_entities else [{'offset': e2_new_sent_start, 'text': e2_trigger}], 
                 }
             if total_length + sents_lens[p] > max_length:
                 break
@@ -157,22 +198,38 @@ def create_new_sent(
         e2_new_sent_start += len(new_sent1) + 1
         e2s_new_sent_start += len(new_sent1) + 1
         e2e_new_sent_start += len(new_sent1) + 1
+        e1_entities, e2_entities = [], []
+        for entity in event1_entities:
+            for offset in findall(entity, final_new_sent):
+                e1_entities.append({'offset': offset, 'text': entity})
+        e1_entities.sort(key=lambda x:x['offset'])
+        for entity in event2_entities:
+            for offset in findall(entity, final_new_sent):
+                e2_entities.append({'offset': offset, 'text': entity})
+        e2_entities.sort(key=lambda x:x['offset'])
+
         assert final_new_sent[e1s_new_sent_start:e1s_new_sent_start + len(e1s)] == e1s
         assert final_new_sent[e1e_new_sent_start:e1e_new_sent_start + len(e1e)] == e1e
         assert final_new_sent[e2s_new_sent_start:e2s_new_sent_start + len(e2s)] == e2s
         assert final_new_sent[e2e_new_sent_start:e2e_new_sent_start + len(e2e)] == e2e
         assert final_new_sent[e1_new_sent_start:e1_new_sent_start + len(e1_trigger)] == e1_trigger
         assert final_new_sent[e2_new_sent_start:e2_new_sent_start + len(e2_trigger)] == e2_trigger
+        for entity in e1_entities:
+            assert final_new_sent[entity['offset']:entity['offset'] + len(entity['text'])] == entity['text']
+        for entity in e2_entities:
+            assert final_new_sent[entity['offset']:entity['offset'] + len(entity['text'])] == entity['text']
         return {
             'new_sent': final_new_sent, 
             'e1_trigger': e1_trigger, 
             'e1_sent_start': e1_new_sent_start, 
             'e1s_sent_start': e1s_new_sent_start, 
             'e1e_sent_start': e1e_new_sent_start, 
+            'e1_entities': e1_entities if e1_entities else [{'offset': e1_new_sent_start, 'text': e1_trigger}], 
             'e2_trigger': e2_trigger, 
             'e2_sent_start': e2_new_sent_start, 
             'e2s_sent_start': e2s_new_sent_start, 
-            'e2e_sent_start': e2e_new_sent_start
+            'e2e_sent_start': e2e_new_sent_start, 
+            'e2_entities': e2_entities if e2_entities else [{'offset': e2_new_sent_start, 'text': e2_trigger}], 
         }
 
 def get_prompt(
