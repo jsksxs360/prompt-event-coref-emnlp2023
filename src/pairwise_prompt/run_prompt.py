@@ -191,8 +191,8 @@ def predict(args, model, tokenizer,
     # create prompt
     prompt_data = get_prompt(
         prompt_type, special_token_dict, new_event_sent['new_sent'], 
-        new_event_sent['e1_trigger'], new_event_sent['e1_sent_start'], new_event_sent['e1s_sent_start'], new_event_sent['e1e_sent_start'], 
-        new_event_sent['e2_trigger'], new_event_sent['e2_sent_start'], new_event_sent['e2s_sent_start'], new_event_sent['e2e_sent_start'], 
+        new_event_sent['e1_trigger'], new_event_sent['e1_sent_start'], new_event_sent['e1s_sent_start'], new_event_sent['e1e_sent_start'], new_event_sent['e1_entities'], 
+        new_event_sent['e2_trigger'], new_event_sent['e2_sent_start'], new_event_sent['e2s_sent_start'], new_event_sent['e2e_sent_start'], new_event_sent['e2_entities'], 
         tokenizer
     )
     prompt_text = prompt_data['prompt']
