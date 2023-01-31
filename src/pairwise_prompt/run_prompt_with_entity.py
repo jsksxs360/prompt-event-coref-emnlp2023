@@ -12,11 +12,11 @@ import sys
 sys.path.append('../../')
 from src.tools import seed_everything, NpEncoder
 from src.pairwise_prompt.arg import parse_args
-from src.pairwise_prompt.data import KBPCoref, KBPCorefTiny, get_dataLoader, get_KBP_entities, SUBTYPES
+from src.pairwise_prompt.data import KBPCoref, KBPCorefTiny, get_dataLoader, get_KBP_entities
 from src.pairwise_prompt.data import BERT_SPECIAL_TOKENS, ROBERTA_SPECIAL_TOKENS
 from src.pairwise_prompt.data import BERT_SPECIAL_TOKEN_DICT, ROBERTA_SPECIAL_TOKEN_DICT
 from src.pairwise_prompt.utils import create_new_sent, get_prompt
-from src.pairwise_prompt.modeling import BertForPromptwithMask, RobertaForPromptwithMask, LongformerForPromptwithMask
+from src.pairwise_prompt.modeling import BertForPromptwithEntity, RobertaForPromptwithEntity, LongformerForPromptwithEntity
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
                     datefmt='%Y/%m/%d %H:%M:%S',
@@ -24,25 +24,25 @@ logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s - %(message)s
 logger = logging.getLogger("Model")
 
 MODEL_CLASSES = {
-    'bert': BertForPromptwithMask,
-    'roberta': RobertaForPromptwithMask, 
-    'longformer': LongformerForPromptwithMask
+    'bert': BertForPromptwithEntity,
+    'roberta': RobertaForPromptwithEntity, 
+    'longformer': LongformerForPromptwithEntity
 }
 PROMPT_LENGTH = {
-    'hb_d': 40, 'd_hb': 40,  # hard base template
-    'hq_d': 40, 'd_hq': 40,  # hard question-style template
-    'sb_d': 40, 'd_sb': 40   # soft base template
+    'hbe_d': 40, 'd_hbe': 40,  # hard base template
+    'hqe_d': 40, 'd_hqe': 40,  # hard question-style template
+    'sbe_d': 40, 'd_sbe': 40   # soft base template
 }
 CONTEXT_K = 2
 
 def to_device(args, batch_data):
     new_batch_data = {}
     for k, v in batch_data.items():
-        if k in ['batch_inputs', 'batch_inputs_with_mask']:
+        if k == 'batch_inputs':
             new_batch_data[k] = {
                 k_: v_.to(args.device) for k_, v_ in v.items()
             }
-        elif k == 'batch_event_idx':
+        elif k in ['batch_event_idx', 'batch_e1_entity_idx', 'batch_e2_entity_idx']:
             new_batch_data[k] = v
         else:
             new_batch_data[k] = torch.tensor(v).to(args.device)
@@ -198,12 +198,9 @@ def predict(args, model, tokenizer,
     prompt_text = prompt_data['prompt']
     mask_idx = prompt_data['mask_idx']
     event_idx = [prompt_data['e1s_idx'], prompt_data['e1e_idx'], prompt_data['e2s_idx'], prompt_data['e2e_idx']]
-    trigger_idx = [
-        [prompt_data['tmp_e1_idx'], prompt_data['tmp_e1e_idx']], 
-        [prompt_data['tmp_e2_idx'], prompt_data['tmp_e2e_idx']], 
-        [prompt_data['e1_idx'], prompt_data['e1e_idx']], 
-        [prompt_data['e2_idx'], prompt_data['e2e_idx']]
-    ]
+    p_idx = [prompt_data['tmp_e1_arg_idx'], prompt_data['tmp_e2_arg_idx']]
+    e1_entity_idx = prompt_data['e1_entity_idxs']
+    e2_entity_idx = prompt_data['e2_entity_idxs']
     inputs = tokenizer(
         prompt_text, 
         max_length=args.max_seq_length, 
@@ -211,20 +208,13 @@ def predict(args, model, tokenizer,
         truncation=True, 
         return_tensors="pt"
     )
-    inputs_with_mask = tokenizer(
-        prompt_text, 
-        max_length=args.max_seq_length, 
-        padding=True, 
-        truncation=True, 
-        return_tensors="pt"
-    )
-    for trigger_s, trigger_e in trigger_idx:
-        inputs_with_mask['input_ids'][0][trigger_s:trigger_e] = tokenizer.mask_token_id
     inputs = {
         'batch_inputs': inputs, 
-        'batch_inputs_with_mask': inputs_with_mask, 
         'batch_mask_idx': [mask_idx], 
-        'batch_event_idx': [event_idx]
+        'batch_event_idx': [event_idx], 
+        'batch_p_idx': [p_idx], 
+        'batch_e1_entity_idx': [e1_entity_idx], 
+        'batch_e2_entity_idx': [e2_entity_idx] 
     }
     pos_id = tokenizer.convert_tokens_to_ids(verbalizer['COREF_TOKEN'])
     neg_id = tokenizer.convert_tokens_to_ids(verbalizer['NONCOREF_TOKEN'])
@@ -251,7 +241,6 @@ if __name__ == '__main__':
     logger.info(f'loading pretrained model and tokenizer of {args.model_type} ...')
     config = AutoConfig.from_pretrained(args.model_checkpoint, cache_dir=args.cache_dir)
     tokenizer = AutoTokenizer.from_pretrained(args.model_checkpoint, max_length=args.max_seq_length, cache_dir=args.cache_dir)
-    args.num_subtypes = len(SUBTYPES) + 1
     model = MODEL_CLASSES[args.model_type].from_pretrained(
         args.model_checkpoint,
         config=config, 
@@ -305,7 +294,7 @@ if __name__ == '__main__':
         labels = [dev_dataset[s_idx]['label'] for s_idx in range(len(dev_dataset))]
         logger.info(f"[Dev] Coref: {labels.count(1)} non-Coref: {labels.count(0)}")
         train(args, train_dataset, dev_dataset, model, tokenizer, 
-            add_mark=args.model_type, collote_fn_type='with_mask', prompt_type=args.prompt_type, verbalizer=verbalizer
+            add_mark=args.model_type, collote_fn_type='with_entity', prompt_type=args.prompt_type, verbalizer=verbalizer
         )
     # Testing
     save_weights = [file for file in os.listdir(args.output_dir) if file.endswith('.bin')]
@@ -322,7 +311,7 @@ if __name__ == '__main__':
         logger.info(f"[Test] Coref: {labels.count(1)} non-Coref: {labels.count(0)}")
         logger.info(f'loading trained weights from {args.output_dir} ...')
         test(args, test_dataset, model, tokenizer, save_weights, 
-            add_mark=args.model_type, collote_fn_type='with_mask', prompt_type=args.prompt_type, verbalizer=verbalizer
+            add_mark=args.model_type, collote_fn_type='with_entity', prompt_type=args.prompt_type, verbalizer=verbalizer
         )
     # Predicting
     if args.do_predict:
