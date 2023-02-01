@@ -338,7 +338,6 @@ def get_dataLoader(args, dataset, tokenizer, add_mark:str, collote_fn_type:str, 
             'batch_inputs': batch_inputs, 
             'batch_mask_idx': batch_mask_idx, 
             'batch_event_idx': batch_event_idx, 
-            'batch_coref': batch_coref, 
             'labels': batch_label
         }
     
@@ -389,7 +388,6 @@ def get_dataLoader(args, dataset, tokenizer, add_mark:str, collote_fn_type:str, 
             'batch_mask_idx': batch_mask_idx, 
             'batch_event_idx': batch_event_idx, 
             'subtypes': batch_subtypes, 
-            'batch_coref': batch_coref, 
             'labels': batch_label
         }
     
@@ -427,7 +425,6 @@ def get_dataLoader(args, dataset, tokenizer, add_mark:str, collote_fn_type:str, 
             'batch_p_idx': batch_p_idx, 
             'batch_e1_entity_idx': batch_e1_entity_idx, 
             'batch_e2_entity_idx': batch_e2_entity_idx, 
-            'batch_coref': batch_coref, 
             'labels': batch_label
         }
     
