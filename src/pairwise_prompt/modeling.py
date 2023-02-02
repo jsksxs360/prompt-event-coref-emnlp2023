@@ -28,7 +28,6 @@ class BertForPrompt(BertPreTrainedModel):
         self.use_device = args.device
         if self.matching_style != 'none':
             self.span_extractor = SelfAttentiveSpanExtractor(input_dim=self.hidden_size)
-            self.coref_cls = nn.Linear(self.hidden_size, 2)
             if self.matching_style == 'multi':
                 self.mapping = nn.Linear(2 * self.hidden_size, self.hidden_size)
             else:
@@ -109,7 +108,6 @@ class RobertaForPrompt(RobertaPreTrainedModel):
         self.use_device = args.device
         if self.matching_style != 'none':
             self.span_extractor = SelfAttentiveSpanExtractor(input_dim=self.hidden_size)
-            self.coref_cls = nn.Linear(self.hidden_size, 2)
             if self.matching_style == 'multi':
                 self.mapping = nn.Linear(2 * self.hidden_size, self.hidden_size)
             else:
@@ -192,7 +190,6 @@ class LongformerForPrompt(LongformerPreTrainedModel):
         self.use_device = args.device
         if self.matching_style != 'none':
             self.span_extractor = SelfAttentiveSpanExtractor(input_dim=self.hidden_size)
-            self.coref_cls = nn.Linear(self.hidden_size, 2)
             if self.matching_style == 'multi':
                 self.mapping = nn.Linear(2 * self.hidden_size, self.hidden_size)
             else:

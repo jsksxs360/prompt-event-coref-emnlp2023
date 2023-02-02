@@ -67,7 +67,7 @@ def create_new_sent(
     Return:
     {
         'sent': new segment contains all the event mentions, 
-        'event_s_e_offset': event offsets in the new segment, 
+        'event_s_e_offset', 'cluster1_s_e_offset', 'cluster2_s_e_offset': event offsets in the new segment, 
         'cluster1_trigger': representative trigger1, 
         'cluster2_trigger': representative trigger2
     }
@@ -155,19 +155,23 @@ def create_new_sent(
 
         return: 
         - new_sen: new segment that contains all the triggers with special labels
-        - new_event_offsets: [[event_start_label_offset, event_end_label_offset]]
+        - new_event_offsets, cluster1_offstes, cluster2_offstes: [[event_start_label_offset, event_end_label_offset]]
         '''
         if len(cluster1_events) == 0 and len(cluster2_events) == 0:
-            return sentence, []
+            return sentence, [], [], []
         all_events = []
         all_events += [{'offset': event['sent_start'], 'trigger': event['trigger'], 'cluster': 1} for event in cluster1_events]
         all_events += [{'offset': event['sent_start'], 'trigger': event['trigger'], 'cluster': 2} for event in cluster2_events]
         all_events.sort(key=lambda x:x['offset'])
-        new_sen, new_event_offsets, start_p = '', [], 0
+        new_sen, start_p = '', 0
+        new_event_offsets, cluster1_offstes, cluster2_offstes = [], [], []
         for event in all_events:
             new_sen += sentence[start_p:event['offset']]
             e_s, e_e = (e1s, e1e) if event['cluster'] == 1 else (e2s, e2e)
             new_event_offsets.append([
+                len(new_sen), len(new_sen) + len(e_s) + len(event['trigger'])
+            ])
+            (cluster1_offstes if event['cluster'] == 1 else cluster2_offstes).append([
                 len(new_sen), len(new_sen) + len(e_s) + len(event['trigger'])
             ])
             new_sen += (e_s + event['trigger'] + e_e)
@@ -177,7 +181,7 @@ def create_new_sent(
             e_s, e_e = (e1s, e1e) if event['cluster'] == 1 else (e2s, e2e)
             event_span = e_s + event['trigger'] + e_e
             assert new_sen[s_offset:s_offset+len(event_span)] == event_span
-        return new_sen, new_event_offsets
+        return new_sen, new_event_offsets, cluster1_offstes, cluster2_offstes
     
     e1s, e1e = special_token_dict['e1s_token'], special_token_dict['e1e_token']
     e2s, e2e = special_token_dict['e2s_token'], special_token_dict['e2e_token']
@@ -222,10 +226,12 @@ def create_new_sent(
     # select word with the largest number in the cluster as representative trigger
     trigger1, trigger2 = Counter(trigger1).most_common()[0][0], Counter(trigger2).most_common()[0][0]
     sentence_event = sorted(sentence_event.items(), key=lambda x:x[0])
-    document, event_s_e_offsets = '', []
+    document, event_s_e_offsets, cluster1_s_e_offset, cluster2_s_e_offset = '', [], [], []
     for _, s_e in sentence_event:
-        new_sen, new_event_offsets = get_sen_with_events(s_e['text'], s_e['cluster1_events'], s_e['cluster2_events'])
+        new_sen, new_event_offsets, cluster1_offstes, cluster2_offstes = get_sen_with_events(s_e['text'], s_e['cluster1_events'], s_e['cluster2_events'])
         event_s_e_offsets += [[s + len(document), e + len(document)] for s, e in new_event_offsets]
+        cluster1_s_e_offset += [[s + len(document), e + len(document)] for s, e in cluster1_offstes]
+        cluster2_s_e_offset += [[s + len(document), e + len(document)] for s, e in cluster2_offstes]
         document += new_sen + ' '
     
     document_length = len(tokenizer(document).tokens())
@@ -233,13 +239,15 @@ def create_new_sent(
     return {
         'sent': document, 
         'event_s_e_offset': event_s_e_offsets, 
+        'cluster1_s_e_offset': cluster1_s_e_offset, 
+        'cluster2_s_e_offset': cluster2_s_e_offset, 
         'cluster1_trigger': trigger1, 
         'cluster2_trigger': trigger2
     }
 
 def get_prompt(
     prompt_type:str, special_token_dict:dict, source_sent:str, 
-    e1_trigger:str, e2_trigger:str, event_s_e_offset:list, 
+    e1_trigger:str, e2_trigger:str, event_s_e_offset:list, cluster1_s_e_offset:list, cluster2_s_e_offset:list, 
     tokenizer
     ):
     '''
@@ -267,25 +275,43 @@ def get_prompt(
     
     if '_d' in prompt_type: # template + document
         event_s_e_offset = [[e_s + len(prompt), e_e + len(prompt)] for e_s, e_e in event_s_e_offset]
+        cluster1_s_e_offset = [[e_s + len(prompt), e_e + len(prompt)] for e_s, e_e in cluster1_s_e_offset]
+        cluster2_s_e_offset = [[e_s + len(prompt), e_e + len(prompt)] for e_s, e_e in cluster2_s_e_offset]
         prompt += source_sent
     elif 'd_' in prompt_type: # document + template
         prompt = source_sent + ' ' + prompt
-    
-    for e_s, e_e in event_s_e_offset: # check offset
+    # check offset
+    for e_s, e_e in event_s_e_offset: 
         assert prompt[e_s:e_s + len(e1s_token)] == e1s_token or prompt[e_s:e_s + len(e2s_token)] == e2s_token
         assert prompt[e_e:e_e + len(e1e_token)] == e1e_token or prompt[e_e:e_e + len(e2e_token)] == e2e_token
+    for e_s, e_e in cluster1_s_e_offset: 
+        assert prompt[e_s:e_s + len(e1s_token)] == e1s_token
+        assert prompt[e_e:e_e + len(e1e_token)] == e1e_token
+    for e_s, e_e in cluster2_s_e_offset: 
+        assert prompt[e_s:e_s + len(e2s_token)] == e2s_token
+        assert prompt[e_e:e_e + len(e2e_token)] == e2e_token
     # convert char offsets to token idxs
     encoding = tokenizer(prompt)
     mask_idx = encoding.char_to_token(prompt.find(mask_token))
     assert mask_idx is not None
-    event_s_e_idxs = []
+    event_s_e_idxs, cluster1_s_e_idx, cluster2_s_e_idx = [], [], []
     for e_s, e_e in event_s_e_offset:
         e_s_idx, e_e_idx = encoding.char_to_token(e_s), encoding.char_to_token(e_e)
         assert e_s_idx is not None and e_e_idx is not None
         event_s_e_idxs.append([e_s_idx, e_e_idx])
+    for e_s, e_e in cluster1_s_e_offset:
+        e_s_idx, e_e_idx = encoding.char_to_token(e_s), encoding.char_to_token(e_e)
+        assert e_s_idx is not None and e_e_idx is not None
+        cluster1_s_e_idx.append([e_s_idx, e_e_idx])
+    for e_s, e_e in cluster2_s_e_offset:
+        e_s_idx, e_e_idx = encoding.char_to_token(e_s), encoding.char_to_token(e_e)
+        assert e_s_idx is not None and e_e_idx is not None
+        cluster2_s_e_idx.append([e_s_idx, e_e_idx])
     
     return {
         'prompt': prompt, 
         'mask_idx': mask_idx, 
-        'event_idx': event_s_e_idxs
+        'event_idx': event_s_e_idxs, 
+        'cluster1_idx': cluster1_s_e_idx, 
+        'cluster2_idx': cluster2_s_e_idx
     }

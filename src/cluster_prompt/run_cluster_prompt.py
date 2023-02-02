@@ -41,7 +41,7 @@ def to_device(args, batch_data):
             new_batch_data[k] = {
                 k_: v_.to(args.device) for k_, v_ in v.items()
             }
-        elif k == 'batch_event_idx':
+        elif k in ['batch_event_idx', 'batch_cluster1_idx', 'batch_cluster2_idx']:
             new_batch_data[k] = v
         else:
             new_batch_data[k] = torch.tensor(v).to(args.device)
@@ -177,13 +177,15 @@ def predict(args, model, tokenizer,
     # create prompt
     prompt_data = get_prompt(
         prompt_type, special_token_dict, new_event_sent['sent'], 
-        new_event_sent['cluster1_trigger'], new_event_sent['cluster2_trigger'], new_event_sent['event_s_e_offset'], 
+        new_event_sent['cluster1_trigger'], new_event_sent['cluster2_trigger'], 
+        new_event_sent['event_s_e_offset'], new_event_sent['cluster1_s_e_offset'], new_event_sent['cluster2_s_e_offset'], 
         tokenizer
     )
     prompt_text = prompt_data['prompt']
     mask_idx = prompt_data['mask_idx']
-    if add_mark == 'longformer':
-        event_idx = prompt_data['event_idx']
+    event_idx = prompt_data['event_idx']
+    cluster1_idx = prompt_data['cluster1_idx']
+    cluster2_idx = prompt_data['cluster2_idx']
     inputs = tokenizer(
         prompt_text, 
         max_length=args.max_seq_length, 
@@ -194,10 +196,9 @@ def predict(args, model, tokenizer,
     inputs = {
         'batch_inputs': inputs, 
         'batch_mask_idx': [mask_idx], 
-        'batch_event_idx': [event_idx]
-    } if add_mark == 'longformer' else {
-        'batch_inputs': inputs, 
-        'batch_mask_idx': [mask_idx]
+        'batch_event_idx': [event_idx], 
+        'batch_cluster1_idx': cluster1_idx, 
+        'batch_cluster2_idx': cluster2_idx
     }
     pos_id = tokenizer.convert_tokens_to_ids(verbalizer['COREF_TOKEN'])
     neg_id = tokenizer.convert_tokens_to_ids(verbalizer['NONCOREF_TOKEN'])

@@ -1,8 +1,9 @@
-export OUTPUT_DIR=./longformer_sb_d_512_event_results/
+export OUTPUT_DIR=./longformer_sb_d_512_e_multi_cosine_results/
 
 python3 run_cluster_prompt.py \
     --output_dir=$OUTPUT_DIR \
     --prompt_type=sb_d \
+    --matching_style=multi_cosine \
     --model_type=longformer \
     --longformer_global_att=event \
     --model_checkpoint=../../PT_MODELS/allenai/longformer-large-4096/ \
@@ -17,10 +18,10 @@ python3 run_cluster_prompt.py \
     --dev_pos_k=15 \
     --dev_neg_k=5 \
     --test_pos_k=10 \
-    --test_neg_k=15 \
+    --test_neg_k=50 \
     --max_seq_length=512 \
     --learning_rate=1e-5 \
-    --num_train_epochs=20 \
+    --num_train_epochs=10 \
     --batch_size=4 \
     --do_train \
     --warmup_proportion=0. \

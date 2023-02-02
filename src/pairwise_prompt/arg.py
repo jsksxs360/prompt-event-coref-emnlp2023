@@ -37,7 +37,7 @@ def parse_args():
     )
     parser.add_argument("--longformer_global_att", default=None, type=str,
         help="global attention of longformer.", 
-        choices=['no', 'mask', 'event', 'mask_event']
+        choices=['no', 'event', 'mask_event']
     )
     
     parser.add_argument("--learning_rate", default=1e-5, type=float, help="The initial learning rate for Adam.")

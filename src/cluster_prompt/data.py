@@ -165,40 +165,19 @@ def get_dataLoader(args, dataset, tokenizer, add_mark:str, collote_fn_type:str, 
 
     def collote_fn(batch_samples):
         batch_sen, batch_mask_idx, batch_coref = [], [], []
+        batch_event_idx, batch_cluster1_idx, batch_cluster2_idx = [], [], []
         for sample in batch_samples:
             prompt_data = get_prompt(
                 prompt_type, special_token_dict, sample['sent'], 
-                sample['cluster1_trigger'], sample['cluster2_trigger'], sample['event_s_e_offset'], 
-                tokenizer
-            )
-            batch_sen.append(prompt_data['prompt'])
-            batch_mask_idx.append(prompt_data['mask_idx'])
-            batch_coref.append(sample['label'])
-        batch_inputs = tokenizer(
-            batch_sen, 
-            max_length=args.max_seq_length, 
-            padding=True, 
-            truncation=True, 
-            return_tensors="pt"
-        )
-        batch_label = [pos_id if coref == 1 else neg_id for coref in batch_coref]
-        return {
-            'batch_inputs': batch_inputs, 
-            'batch_mask_idx': batch_mask_idx, 
-            'labels': batch_label
-        }
-
-    def collote_fn_longformer(batch_samples):
-        batch_sen, batch_mask_idx, batch_event_idx, batch_coref = [], [], [], []
-        for sample in batch_samples:
-            prompt_data = get_prompt(
-                prompt_type, special_token_dict, sample['sent'], 
-                sample['cluster1_trigger'], sample['cluster2_trigger'], sample['event_s_e_offset'], 
+                sample['cluster1_trigger'], sample['cluster2_trigger'], 
+                sample['event_s_e_offset'], sample['cluster1_s_e_offset'], sample['cluster2_s_e_offset'], 
                 tokenizer
             )
             batch_sen.append(prompt_data['prompt'])
             batch_mask_idx.append(prompt_data['mask_idx'])
             batch_event_idx.append(prompt_data['event_idx'])
+            batch_cluster1_idx.append(prompt_data['cluster1_idx'])
+            batch_cluster2_idx.append(prompt_data['cluster2_idx'])
             batch_coref.append(sample['label'])
         batch_inputs = tokenizer(
             batch_sen, 
@@ -212,11 +191,13 @@ def get_dataLoader(args, dataset, tokenizer, add_mark:str, collote_fn_type:str, 
             'batch_inputs': batch_inputs, 
             'batch_mask_idx': batch_mask_idx, 
             'batch_event_idx': batch_event_idx, 
+            'batch_cluster1_idx': batch_cluster1_idx, 
+            'batch_cluster2_idx': batch_cluster2_idx, 
             'labels': batch_label
         }
     
     if collote_fn_type == 'normal':
-        select_collote_fn = collote_fn_longformer if add_mark == 'longformer' else collote_fn
+        select_collote_fn = collote_fn
     
     return DataLoader(
         dataset, 
