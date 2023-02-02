@@ -71,10 +71,15 @@ def create_new_sent(
         e2_new_sent_start = len(new_sent_before) + len(e1_trigger) + len(new_sent_middle)
         e2s_new_sent_start = e2_new_sent_start - len(e2s)
         e2e_new_sent_start = e2_new_sent_start + len(e2_trigger)
+        sent_s = e1_new_sent_start - len(f'{before}{e1s}')
+        sent_e = e2e_new_sent_start + len(f'{e2e}{next}')
+        assert new_sent[sent_s:sent_s + len(f'{before}{e1s}')] == f'{before}{e1s}'
+        assert new_sent[sent_e - len(f'{e2e}{next}'):sent_e] == f'{e2e}{next}'
         event_entities = []
         for entity in event_entities:
             for offset in findall(entity, new_sent):
-                event_entities.append({'offset': offset, 'text': entity})
+                if sent_s <= offset < sent_e: 
+                    event_entities.append({'offset': offset, 'text': entity})
         event_entities.sort(key=lambda x:x['offset'])
         
         assert new_sent[e1_new_sent_start:e1_new_sent_start + len(e1_trigger)] == e1_trigger
@@ -148,14 +153,24 @@ def create_new_sent(
                 e2_new_sent_start += len(new_sent1) + 1
                 e2s_new_sent_start += len(new_sent1) + 1
                 e2e_new_sent_start += len(new_sent1) + 1
+                sent1_s = e1_new_sent_start - len(f'{before_1}{e1s}')
+                sent1_e = e1e_new_sent_start + len(f'{e1e}{next_1}')
+                sent2_s = e2_new_sent_start - len(f'{before_2}{e2s}')
+                sent2_e = e2e_new_sent_start + len(f'{e2e}{next_2}')
+                assert final_new_sent[sent1_s:sent1_s + len(f'{before_1}{e1s}')] == f'{before_1}{e1s}'
+                assert final_new_sent[sent1_e - len(f'{e1e}{next_1}'):sent1_e] == f'{e1e}{next_1}'
+                assert final_new_sent[sent2_s:sent2_s + len(f'{before_2}{e2s}')] == f'{before_2}{e2s}'
+                assert final_new_sent[sent2_e - len(f'{e2e}{next_2}'):sent2_e] == f'{e2e}{next_2}'
                 e1_entities, e2_entities = [], []
                 for entity in event1_entities:
                     for offset in findall(entity, final_new_sent):
-                        e1_entities.append({'offset': offset, 'text': entity})
+                        if sent1_s <= offset < sent1_e: 
+                            e1_entities.append({'offset': offset, 'text': entity})
                 e1_entities.sort(key=lambda x:x['offset'])
                 for entity in event2_entities:
                     for offset in findall(entity, final_new_sent):
-                        e2_entities.append({'offset': offset, 'text': entity})
+                        if sent2_s <= offset < sent2_e: 
+                            e2_entities.append({'offset': offset, 'text': entity})
                 e2_entities.sort(key=lambda x:x['offset'])
                 
                 assert final_new_sent[e1_new_sent_start:e1_new_sent_start + len(e1_trigger)] == e1_trigger
@@ -200,14 +215,24 @@ def create_new_sent(
         e2_new_sent_start += len(new_sent1) + 1
         e2s_new_sent_start += len(new_sent1) + 1
         e2e_new_sent_start += len(new_sent1) + 1
+        sent1_s = e1_new_sent_start - len(f'{before_1}{e1s}')
+        sent1_e = e1e_new_sent_start + len(f'{e1e}{next_1}')
+        sent2_s = e2_new_sent_start - len(f'{before_2}{e2s}')
+        sent2_e = e2e_new_sent_start + len(f'{e2e}{next_2}')
+        assert final_new_sent[sent1_s:sent1_s + len(f'{before_1}{e1s}')] == f'{before_1}{e1s}'
+        assert final_new_sent[sent1_e - len(f'{e1e}{next_1}'):sent1_e] == f'{e1e}{next_1}'
+        assert final_new_sent[sent2_s:sent2_s + len(f'{before_2}{e2s}')] == f'{before_2}{e2s}'
+        assert final_new_sent[sent2_e - len(f'{e2e}{next_2}'):sent2_e] == f'{e2e}{next_2}'
         e1_entities, e2_entities = [], []
         for entity in event1_entities:
             for offset in findall(entity, final_new_sent):
-                e1_entities.append({'offset': offset, 'text': entity})
+                if sent1_s <= offset < sent1_e: 
+                    e1_entities.append({'offset': offset, 'text': entity})
         e1_entities.sort(key=lambda x:x['offset'])
         for entity in event2_entities:
             for offset in findall(entity, final_new_sent):
-                e2_entities.append({'offset': offset, 'text': entity})
+                if sent2_s <= offset < sent2_e: 
+                    e2_entities.append({'offset': offset, 'text': entity})
         e2_entities.sort(key=lambda x:x['offset'])
 
         assert final_new_sent[e1s_new_sent_start:e1s_new_sent_start + len(e1s)] == e1s
