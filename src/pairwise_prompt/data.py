@@ -6,9 +6,9 @@ from tqdm.auto import tqdm
 from utils import create_new_sent, get_prompt
 
 PROMPT_TYPE = [
-    'hb_d', 'd_hb', 'hbe_d', 'd_hbe', # hard base template
-    'hq_d', 'd_hq', 'hqe_d', 'd_hqe', # hard question-style template
-    'sb_d', 'd_sb', 'sbe_d', 'd_sbe'  # soft base template
+    'hb_d', 'd_hb', 'hbe_d', 'd_hbe', 'hbt_d', 'd_hbt',  # hard base template
+    'hq_d', 'd_hq', 'hqe_d', 'd_hqe', 'hqt_d', 'd_hqt',  # hard question-style template
+    'sb_d', 'd_sb', 'sbe_d', 'd_sbe', 'sbt_d', 'd_sbt'   # soft base template
 ]
 SUBTYPES = [ # 18 subtypes
     'artifact', 'transferownership', 'transaction', 'broadcast', 'contact', 'demonstrate', \
@@ -34,6 +34,9 @@ BERT_SPECIAL_TOKEN_DICT = {
     'l_token4': '[L_TOKEN4]', 'l_token5': '[L_TOKEN5]', 'l_token6': '[L_TOKEN6]', 
     'mask_token': '[MASK]'
 }
+for subtype_id in range(len(subtype2id) + 1):
+    BERT_SPECIAL_TOKENS.append(f'[ST_{subtype_id}]')
+    ROBERTA_SPECIAL_TOKENS.append(f'<st_{subtype_id}>')
 ROBERTA_SPECIAL_TOKEN_DICT = {
     'e1s_token': '<event1_start>', 'e1e_token': '<event1_end>', 'e1_arg_token': '<l_token7>', 
     'e2s_token': '<event2_start>', 'e2e_token': '<event2_end>', 'e2_arg_token': '<l_token8>', 
@@ -302,7 +305,8 @@ class KBPCorefTiny(Dataset):
 
 def get_dataLoader(args, dataset, tokenizer, add_mark:str, collote_fn_type:str, prompt_type:str, verbalizer:dict, batch_size:int=None, shuffle:bool=False):
 
-    assert add_mark in ADD_MARK_TYPE and collote_fn_type in ['normal', 'with_mask', 'with_entity']
+    assert add_mark in ADD_MARK_TYPE and collote_fn_type in ['normal', 'with_subtype', 'with_entity', 'with_mask']
+    assert (collote_fn_type == 'with_subtype') == ('t' in prompt_type)
     assert (collote_fn_type == 'with_entity') == ('e' in prompt_type)
     assert prompt_type in PROMPT_TYPE
     
@@ -310,6 +314,10 @@ def get_dataLoader(args, dataset, tokenizer, add_mark:str, collote_fn_type:str, 
 
     pos_id = tokenizer.convert_tokens_to_ids(verbalizer['COREF_TOKEN'])
     neg_id = tokenizer.convert_tokens_to_ids(verbalizer['NONCOREF_TOKEN'])
+    st_ids = {
+        subtype_id: tokenizer.convert_tokens_to_ids(f'[ST_{subtype_id}]' if add_mark=='bert' else f'<st_{subtype_id}>') 
+        for subtype_id in range(len(SUBTYPES) + 1)
+    }
 
     def collote_fn(batch_samples):
         batch_sen, batch_mask_idx, batch_event_idx, batch_coref = [], [], [], []
@@ -341,6 +349,84 @@ def get_dataLoader(args, dataset, tokenizer, add_mark:str, collote_fn_type:str, 
             'labels': batch_label
         }
     
+    def collote_fn_with_subtype(batch_samples):
+        batch_sen, batch_mask_idx, batch_event_idx, batch_coref = [], [], [], []
+        batch_t1_mask_idx, batch_t2_mask_idx, batch_st1, batch_st2 = [], [], [], []
+        for sample in batch_samples:
+            prompt_data = get_prompt(
+                prompt_type, special_token_dict, sample['sent'], 
+                sample['e1_trigger'], sample['e1_start'], sample['e1s_start'], sample['e1e_start'], sample['e1_entities'], 
+                sample['e2_trigger'], sample['e2_start'], sample['e2s_start'], sample['e2e_start'], sample['e2_entities'], 
+                tokenizer
+            )
+            batch_sen.append(prompt_data['prompt'])
+            batch_t1_mask_idx.append(prompt_data['tmp_t1_idx'])
+            batch_t2_mask_idx.append(prompt_data['tmp_t2_idx'])
+            batch_mask_idx.append(prompt_data['mask_idx'])
+            batch_event_idx.append([
+                prompt_data['e1s_idx'], prompt_data['e1e_idx'], prompt_data['e2s_idx'], prompt_data['e2e_idx']
+            ])
+            batch_st1.append(sample['e1_subtype'])
+            batch_st2.append(sample['e2_subtype'])
+            batch_coref.append(sample['label'])
+        batch_inputs = tokenizer(
+            batch_sen, 
+            max_length=args.max_seq_length, 
+            padding=True, 
+            truncation=True, 
+            return_tensors="pt"
+        )
+        batch_subtype1 = [st_ids[t] for t in batch_st1]
+        batch_subtype2 = [st_ids[t] for t in batch_st2]
+        batch_label = [pos_id if coref == 1 else neg_id  for coref in batch_coref]
+        return {
+            'batch_inputs': batch_inputs, 
+            'batch_t1_mask_idx': batch_t1_mask_idx, 
+            'batch_t2_mask_idx': batch_t2_mask_idx, 
+            'batch_mask_idx': batch_mask_idx, 
+            'batch_event_idx': batch_event_idx, 
+            'subtype1': batch_subtype1, 
+            'subtype2': batch_subtype2, 
+            'labels': batch_label
+        }
+    
+    def collote_fn_with_entity(batch_samples):
+        batch_sen, batch_mask_idx, batch_event_idx, batch_p_idx, batch_coref = [], [], [], [], []
+        batch_e1_entity_idx, batch_e2_entity_idx = [], []
+        for sample in batch_samples:
+            prompt_data = get_prompt(
+                prompt_type, special_token_dict, sample['sent'], 
+                sample['e1_trigger'], sample['e1_start'], sample['e1s_start'], sample['e1e_start'], sample['e1_entities'], 
+                sample['e2_trigger'], sample['e2_start'], sample['e2s_start'], sample['e2e_start'], sample['e2_entities'], 
+                tokenizer
+            )
+            batch_sen.append(prompt_data['prompt'])
+            batch_mask_idx.append(prompt_data['mask_idx'])
+            batch_event_idx.append([
+                prompt_data['e1s_idx'], prompt_data['e1e_idx'], prompt_data['e2s_idx'], prompt_data['e2e_idx']
+            ])
+            batch_p_idx.append([prompt_data['tmp_e1_arg_idx'], prompt_data['tmp_e2_arg_idx']])
+            batch_e1_entity_idx.append(prompt_data['e1_entity_idxs'])
+            batch_e2_entity_idx.append(prompt_data['e2_entity_idxs'])
+            batch_coref.append(sample['label'])
+        batch_inputs = tokenizer(
+            batch_sen, 
+            max_length=args.max_seq_length, 
+            padding=True, 
+            truncation=True, 
+            return_tensors="pt"
+        )
+        batch_label = [pos_id if coref == 1 else neg_id  for coref in batch_coref]
+        return {
+            'batch_inputs': batch_inputs, 
+            'batch_mask_idx': batch_mask_idx, 
+            'batch_event_idx': batch_event_idx, 
+            'batch_p_idx': batch_p_idx, 
+            'batch_e1_entity_idx': batch_e1_entity_idx, 
+            'batch_e2_entity_idx': batch_e2_entity_idx, 
+            'labels': batch_label
+        }
+
     def collote_fn_with_mask(batch_samples):
         batch_sen, batch_mask_idx, batch_event_idx, batch_trigger_idx = [], [], [], []
         batch_coref, batch_subtypes = [], []
@@ -391,49 +477,14 @@ def get_dataLoader(args, dataset, tokenizer, add_mark:str, collote_fn_type:str, 
             'labels': batch_label
         }
     
-    def collote_fn_with_entity(batch_samples):
-        batch_sen, batch_mask_idx, batch_event_idx, batch_p_idx, batch_coref = [], [], [], [], []
-        batch_e1_entity_idx, batch_e2_entity_idx = [], []
-        for sample in batch_samples:
-            prompt_data = get_prompt(
-                prompt_type, special_token_dict, sample['sent'], 
-                sample['e1_trigger'], sample['e1_start'], sample['e1s_start'], sample['e1e_start'], sample['e1_entities'], 
-                sample['e2_trigger'], sample['e2_start'], sample['e2s_start'], sample['e2e_start'], sample['e2_entities'], 
-                tokenizer
-            )
-            batch_sen.append(prompt_data['prompt'])
-            batch_mask_idx.append(prompt_data['mask_idx'])
-            batch_event_idx.append([
-                prompt_data['e1s_idx'], prompt_data['e1e_idx'], prompt_data['e2s_idx'], prompt_data['e2e_idx']
-            ])
-            batch_p_idx.append([prompt_data['tmp_e1_arg_idx'], prompt_data['tmp_e2_arg_idx']])
-            batch_e1_entity_idx.append(prompt_data['e1_entity_idxs'])
-            batch_e2_entity_idx.append(prompt_data['e2_entity_idxs'])
-            batch_coref.append(sample['label'])
-        batch_inputs = tokenizer(
-            batch_sen, 
-            max_length=args.max_seq_length, 
-            padding=True, 
-            truncation=True, 
-            return_tensors="pt"
-        )
-        batch_label = [pos_id if coref == 1 else neg_id  for coref in batch_coref]
-        return {
-            'batch_inputs': batch_inputs, 
-            'batch_mask_idx': batch_mask_idx, 
-            'batch_event_idx': batch_event_idx, 
-            'batch_p_idx': batch_p_idx, 
-            'batch_e1_entity_idx': batch_e1_entity_idx, 
-            'batch_e2_entity_idx': batch_e2_entity_idx, 
-            'labels': batch_label
-        }
-    
     if collote_fn_type == 'normal':
         select_collote_fn = collote_fn
-    elif collote_fn_type == 'with_mask':
-        select_collote_fn = collote_fn_with_mask
+    elif collote_fn_type == 'with_subtype':
+        select_collote_fn = collote_fn_with_subtype
     elif collote_fn_type == 'with_entity':
         select_collote_fn = collote_fn_with_entity
+    elif collote_fn_type == 'with_mask':
+        select_collote_fn = collote_fn_with_mask
     
     return DataLoader(
         dataset, 
@@ -509,19 +560,19 @@ if __name__ == '__main__':
     batch_datas = iter(train_dataloader)
     for step in tqdm(range(len(train_dataloader))):
         next(batch_datas)
-    # with mask
-    print('=' * 20, 'with_mask')
-    train_dataloader = get_dataLoader(args, train_small_data, tokenizer, add_mark='longformer', collote_fn_type='with_mask', prompt_type='sb_d', verbalizer=verbalizer, shuffle=True)
+    # with subtype
+    print('=' * 20, 'with_subtype')
+    train_dataloader = get_dataLoader(args, train_small_data, tokenizer, add_mark='longformer', collote_fn_type='with_subtype', prompt_type='sbt_d', verbalizer=verbalizer, shuffle=True)
     batch_data = next(iter(train_dataloader))
-    batch_X, batch_X_with_mask, batch_y = batch_data['batch_inputs'], batch_data['batch_inputs_with_mask'], batch_data['labels']
+    batch_X, batch_y, batch_st1, batch_st2 = batch_data['batch_inputs'], batch_data['labels'], batch_data['subtype1'], batch_data['subtype2']
     print('batch_X shape:', {k: v.shape for k, v in batch_X.items()})
-    print('batch_X_with_mask shape:', {k: v.shape for k, v in batch_X_with_mask.items()})
     print('batch_y shape:', len(batch_y))
     print(batch_X)
-    print(batch_X_with_mask)
     print(batch_y)
+    print(batch_st1)
+    print(batch_st2)
+    print(batch_data['batch_t1_mask_idx'], batch_data['batch_t2_mask_idx'], batch_data['batch_mask_idx'])
     print(tokenizer.decode(batch_X['input_ids'][0]))
-    print(tokenizer.decode(batch_X_with_mask['input_ids'][0]))
     print('Testing dataloader...')
     batch_datas = iter(train_dataloader)
     for step in tqdm(range(len(train_dataloader))):
@@ -541,6 +592,23 @@ if __name__ == '__main__':
     print('p_idx:', first_p_idx, tokenizer.decode(first_input_ids[first_p_idx[0]]), tokenizer.decode(first_input_ids[first_p_idx[1]]))
     print('e1_entity_idx:', batch_data['batch_e1_entity_idx'][0], tokenizer.decode(first_input_ids[batch_data['batch_e1_entity_idx'][0][0][0]]))
     print('e2_entity_idx:', batch_data['batch_e2_entity_idx'][0], tokenizer.decode(first_input_ids[batch_data['batch_e2_entity_idx'][0][0][0]]))
+    print('Testing dataloader...')
+    batch_datas = iter(train_dataloader)
+    for step in tqdm(range(len(train_dataloader))):
+        next(batch_datas)
+    # with mask
+    print('=' * 20, 'with_mask')
+    train_dataloader = get_dataLoader(args, train_small_data, tokenizer, add_mark='longformer', collote_fn_type='with_mask', prompt_type='sb_d', verbalizer=verbalizer, shuffle=True)
+    batch_data = next(iter(train_dataloader))
+    batch_X, batch_X_with_mask, batch_y = batch_data['batch_inputs'], batch_data['batch_inputs_with_mask'], batch_data['labels']
+    print('batch_X shape:', {k: v.shape for k, v in batch_X.items()})
+    print('batch_X_with_mask shape:', {k: v.shape for k, v in batch_X_with_mask.items()})
+    print('batch_y shape:', len(batch_y))
+    print(batch_X)
+    print(batch_X_with_mask)
+    print(batch_y)
+    print(tokenizer.decode(batch_X['input_ids'][0]))
+    print(tokenizer.decode(batch_X_with_mask['input_ids'][0]))
     print('Testing dataloader...')
     batch_datas = iter(train_dataloader)
     for step in tqdm(range(len(train_dataloader))):

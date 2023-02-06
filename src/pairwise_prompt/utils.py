@@ -269,9 +269,9 @@ def get_prompt(
     create different type prompts
 
     - prompt_type: \n
-        'hb_d', 'd_hb', 'hbe_d', 'd_hbe', # hard base template\n
-        'hq_d', 'd_hq', 'hqe_d', 'd_hqe', # hard question-style template\n
-        'sb_d', 'd_sb', 'sbe_d', 'd_sbe'  # soft base template
+        'hb_d', 'd_hb', 'hbe_d', 'd_hbe', 'hbt_d', 'd_hbt',  # hard base template\n
+        'hq_d', 'd_hq', 'hqe_d', 'd_hqe', 'hqt_d', 'd_hqt',  # hard question-style template\n
+        'sb_d', 'd_sb', 'sbe_d', 'd_sbe', 'sbt_d', 'd_sbt'   # soft base template
     '''
     
     e1s_token, e1e_token, e1_arg_token = special_token_dict['e1s_token'], special_token_dict['e1e_token'], special_token_dict['e1_arg_token']
@@ -304,6 +304,24 @@ def get_prompt(
             assert prompt == (
                 f'In this document, the {e1s_token}{e1_trigger}{e1e_token} event with {e1_arg_token} as participants '
                 f'and the {e2s_token}{e2_trigger}{e2e_token} event with {e2_arg_token} as participants refer to {mask_token} event. '
+            )
+        elif 't' in prompt_type: # with event subtype
+            s1, s2, s3, s4, s5 = (
+                f'In this document, the {mask_token} event ', 
+                f'{e1s_token}{e1_trigger}', 
+                f'{e1e_token} and the {mask_token} event ', 
+                f'{e2s_token}{e2_trigger}', 
+                f'{e2e_token} refer to {mask_token} event. '
+            )
+            tmp_e1s_start = len(s1)
+            tmp_e1e_start = tmp_e1s_start + len(s2)
+            tmp_e2s_start = tmp_e1e_start + len(s3)
+            tmp_e2e_start = tmp_e2s_start + len(s4)
+            tmp_e1_start, tmp_e2_start = tmp_e1s_start + len(e1s_token), tmp_e2s_start + len(e2s_token)
+            prompt = s1 + s2 + s3 + s4 + s5
+            assert prompt == (
+                f'In this document, the {mask_token} event {e1s_token}{e1_trigger}{e1e_token} and '
+                f'the {mask_token} event {e2s_token}{e2_trigger}{e2e_token} refer to {mask_token} event. '
             )
         else:
             s1, s2, s3, s4, s5 = (
@@ -346,6 +364,24 @@ def get_prompt(
                 f'In this document, the {e1s_token}{e1_trigger}{e1e_token} event with {e1_arg_token} as participants '
                 f'and the {e2s_token}{e2_trigger}{e2e_token} event with {e2_arg_token} as participants refer to the same event? {mask_token}. '
             )
+        elif 't' in prompt_type: # with event subtype
+            s1, s2, s3, s4, s5 = (
+                f'In this document, the {mask_token} event ', 
+                f'{e1s_token}{e1_trigger}', 
+                f'{e1e_token} and the {mask_token} event ', 
+                f'{e2s_token}{e2_trigger}', 
+                f'{e2e_token} refer to the same event? {mask_token}. '
+            )
+            tmp_e1s_start = len(s1)
+            tmp_e1e_start = tmp_e1s_start + len(s2)
+            tmp_e2s_start = tmp_e1e_start + len(s3)
+            tmp_e2e_start = tmp_e2s_start + len(s4)
+            tmp_e1_start, tmp_e2_start = tmp_e1s_start + len(e1s_token), tmp_e2s_start + len(e2s_token)
+            prompt = s1 + s2 + s3 + s4 + s5
+            assert prompt == (
+                f'In this document, the {mask_token} event {e1s_token}{e1_trigger}{e1e_token} and '
+                f'the {mask_token} event {e2s_token}{e2_trigger}{e2e_token} refer to the same event? {mask_token}. '
+            )
         else:
             s1, s2, s3, s4, s5 = (
                 'In this document, the ', 
@@ -386,6 +422,24 @@ def get_prompt(
             assert prompt == (
                 f'In this document, {l_token1} {e1s_token}{e1_trigger}{e1e_token} {l_token2} {e1_arg_token} '
                 f'{l_token3} {e2s_token}{e2_trigger}{e2e_token} {l_token4} {e2_arg_token} {l_token5} {mask_token} {l_token6}. '
+            )
+        elif 't' in prompt_type: # with event subtype
+            s1, s2, s3, s4, s5 = (
+                f'In this document, {l_token1} {mask_token} ', 
+                f'{e1s_token}{e1_trigger}', 
+                f'{e1e_token} {l_token2} {l_token3} {mask_token} ', 
+                f'{e2s_token}{e2_trigger}', 
+                f'{e2e_token} {l_token4} {l_token5} {mask_token} {l_token6}. '
+            )
+            tmp_e1s_start = len(s1)
+            tmp_e1e_start = tmp_e1s_start + len(s2)
+            tmp_e2s_start = tmp_e1e_start + len(s3)
+            tmp_e2e_start = tmp_e2s_start + len(s4)
+            tmp_e1_start, tmp_e2_start = tmp_e1s_start + len(e1s_token), tmp_e2s_start + len(e2s_token)
+            prompt = s1 + s2 + s3 + s4 + s5
+            assert prompt == (
+                f'In this document, {l_token1} {mask_token} {e1s_token}{e1_trigger}{e1e_token} {l_token2} '
+                f'{l_token3} {mask_token} {e2s_token}{e2_trigger}{e2e_token} {l_token4} {l_token5} {mask_token} {l_token6}. '
             )
         else:
             s1, s2, s3, s4, s5 = (
@@ -440,7 +494,15 @@ def get_prompt(
         assert prompt[entity['offset']:entity['offset'] + len(entity['text'])] == entity['text'], f'{prompt}\n{entity}'
     # convert char offsets to token idxs
     encoding = tokenizer(prompt)
-    mask_idx = encoding.char_to_token(prompt.find(mask_token))
+    tmp_t1_idx, tmp_t2_idx = 0, 0
+    if 't' in prompt_type:
+        mask_starts = list(findall(mask_token, prompt))
+        assert len(mask_starts) == 3
+        tmp_t1_idx = encoding.char_to_token(mask_starts[0])
+        tmp_t2_idx = encoding.char_to_token(mask_starts[1])
+        mask_idx = encoding.char_to_token(mask_starts[2])
+    else:
+        mask_idx = encoding.char_to_token(prompt.find(mask_token))
     e1_idx, e1s_idx, e1e_idx = encoding.char_to_token(e1_start), encoding.char_to_token(e1s_start), encoding.char_to_token(e1e_start)
     e2_idx, e2s_idx, e2e_idx = encoding.char_to_token(e2_start), encoding.char_to_token(e2s_start), encoding.char_to_token(e2e_start)
     tmp_e1_idx, tmp_e1s_idx, tmp_e1e_idx, tmp_e1_arg_idx = (
@@ -466,8 +528,8 @@ def get_prompt(
         e2_entity_idxs.append([ent_s_idx, ent_e_idx])
     assert None not in [
         mask_idx, 
-        tmp_e1_idx, tmp_e1s_idx, tmp_e1e_idx, tmp_e1_arg_idx, 
-        tmp_e2_idx, tmp_e2s_idx, tmp_e2e_idx, tmp_e2_arg_idx, 
+        tmp_e1_idx, tmp_e1s_idx, tmp_e1e_idx, tmp_e1_arg_idx, tmp_t1_idx, 
+        tmp_e2_idx, tmp_e2s_idx, tmp_e2e_idx, tmp_e2_arg_idx, tmp_t2_idx, 
         e1_idx, e1s_idx, e1e_idx, e2_idx, e2s_idx, e2e_idx
     ]
     
@@ -478,10 +540,12 @@ def get_prompt(
         'tmp_e1s_idx': tmp_e1s_idx, 
         'tmp_e1e_idx': tmp_e1e_idx, 
         'tmp_e1_arg_idx': tmp_e1_arg_idx, 
+        'tmp_t1_idx': tmp_t1_idx, 
         'tmp_e2_idx': tmp_e2_idx, 
         'tmp_e2s_idx': tmp_e2s_idx, 
         'tmp_e2e_idx': tmp_e2e_idx, 
         'tmp_e2_arg_idx': tmp_e2_arg_idx, 
+        'tmp_t2_idx': tmp_t2_idx, 
         'e1_idx': e1_idx, 
         'e1s_idx': e1s_idx, 
         'e1e_idx': e1e_idx, 
