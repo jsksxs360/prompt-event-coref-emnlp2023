@@ -197,8 +197,8 @@ def predict(args, model, tokenizer,
         'batch_inputs': inputs, 
         'batch_mask_idx': [mask_idx], 
         'batch_event_idx': [event_idx], 
-        'batch_cluster1_idx': cluster1_idx, 
-        'batch_cluster2_idx': cluster2_idx
+        'batch_cluster1_idx': [cluster1_idx], 
+        'batch_cluster2_idx': [cluster2_idx]
     }
     pos_id = tokenizer.convert_tokens_to_ids(verbalizer['COREF_TOKEN'])
     neg_id = tokenizer.convert_tokens_to_ids(verbalizer['NONCOREF_TOKEN'])
