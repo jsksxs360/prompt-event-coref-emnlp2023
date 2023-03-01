@@ -31,7 +31,7 @@ def get_pred_arguments(arg_file:str) -> dict:
     place_roles = set(['place', 'destination', 'origin'])
     arg_dict = {}
     with open(arg_file, 'rt', encoding='utf-8') as f:
-        for line in tqdm(f.readlines()):
+        for line in f:
             sample = json.loads(line.strip())
             arg_dict[sample['doc_id']] = {
                 event['start']: [
@@ -45,6 +45,23 @@ def get_pred_arguments(arg_file:str) -> dict:
             }
     return arg_dict
 
+def get_event_cluster_id(event_id:str, clusters:list) -> str:
+    for cluster in clusters:
+        if event_id in cluster['events']:
+            return cluster['hopper_id']
+    raise ValueError(f'Unknown event_id: {event_id}')
+
+def convert_args_to_str(args, include_participant=True, include_place=True):
+    arg_str = ''
+    participants, places = [arg for arg in args if arg['role'] == 'participant'], [arg for arg in args if arg['role'] == 'place']
+    if include_participant and len(participants) > 0:
+        participants.sort(key=lambda x: x['global_offset'])
+        arg_str = f"with {', '.join([arg['mention'] for arg in participants])} as participants"
+    if include_place and len(places) > 0:
+        places.sort(key=lambda x: x['global_offset'])
+        arg_str += ' ' + f"at {', '.join([arg['mention'] for arg in places])}"
+    return arg_str.strip()
+
 class KBPCoref(Dataset):
     def __init__(self, data_file:str, arg_file:str, prompt_type:str, model_type:str, tokenizer, max_length:int):
         assert prompt_type in PROMPT_TYPE and model_type in ['bert', 'roberta', 'longformer']
@@ -53,13 +70,7 @@ class KBPCoref(Dataset):
         self.max_length = max_length
         self.arg_dict = get_pred_arguments(arg_file)
         self.data = self.load_data(data_file, prompt_type)
-        
-    def _get_event_cluster_id(self, event_id:str, clusters:list) -> str:
-        for cluster in clusters:
-            if event_id in cluster['events']:
-                return cluster['hopper_id']
-        raise ValueError(f'Unknown event_id: {event_id}')
-
+    
     def load_data(self, data_file, prompt_type:str):
         Data = []
         with open(data_file, 'rt', encoding='utf-8') as f:
@@ -73,17 +84,20 @@ class KBPCoref(Dataset):
                 for i in range(len(events) - 1):
                     for j in range(i + 1, len(events)):
                         event_1, event_2 = events[i], events[j]
-                        event_1_cluster_id = self._get_event_cluster_id(event_1['event_id'], clusters)
-                        event_2_cluster_id = self._get_event_cluster_id(event_2['event_id'], clusters)
+                        event_1_cluster_id = get_event_cluster_id(event_1['event_id'], clusters)
+                        event_2_cluster_id = get_event_cluster_id(event_2['event_id'], clusters)
+                        event_1_arg_str = convert_args_to_str(self.arg_dict[sample['doc_id']][event_1['start']])
+                        event_2_arg_str = convert_args_to_str(self.arg_dict[sample['doc_id']][event_2['start']])
                         prompt_data = create_prompt(
-                            event_1['sent_idx'], event_1['sent_start'], event_1['trigger'], 
-                            event_2['sent_idx'], event_2['sent_start'], event_2['trigger'], 
+                            event_1['sent_idx'], event_1['sent_start'], event_1['trigger'], event_1_arg_str, 
+                            event_2['sent_idx'], event_2['sent_start'], event_2['trigger'], event_2_arg_str, 
                             sentences, sentences_lengths, 
                             prompt_type, self.model_type, self.tokenizer, self.max_length
                         )
                         Data.append({
                             'id': sample['doc_id'], 
                             'prompt': prompt_data['prompt'], 
+                            'mask_offset': prompt_data['mask_offset'], 
                             'e1_id': event_1['start'], # event1
                             'e1_trigger': event_1['trigger'], 
                             'e1_subtype': event_1['subtype'] if event_1['subtype'] in EVENT_SUBTYPES else 'normal', 
@@ -120,29 +134,32 @@ if __name__ == '__main__':
                                     for doc in doc_list for cluster in doc['clusters']])
         print(f"Doc: {doc_num} | Event: {event_num} | Cluster: {cluster_num} | Singleton: {singleton_num}")
 
-    arg_dict = get_pred_arguments('../../data/EventExtraction/omni_gold_test_pred_args.json')
-    for event_arg_dic in arg_dict.values():
-        print(event_arg_dic)
-    # from transformers import AutoTokenizer
-    # import argparse
-    # parser = argparse.ArgumentParser()
-    # args = parser.parse_args()
-    # args.batch_size = 4
-    # args.max_seq_length = 512
-    # args.model_type = 'longformer'
-    # args.model_checkpoint = '../../PT_MODELS/allenai/longformer-large-4096'
+    # arg_dict = get_pred_arguments('../../data/EventExtraction/omni_gold_test_pred_args.json')
+    # for event_arg_dic in arg_dict.values():
+    #     print(event_arg_dic)
+    from transformers import AutoTokenizer
+    import argparse
+    parser = argparse.ArgumentParser()
+    args = parser.parse_args()
+    args.batch_size = 4
+    args.max_seq_length = 512
+    args.model_type = 'longformer'
+    args.model_checkpoint = '../../PT_MODELS/allenai/longformer-large-4096'
 
-    # tokenizer = AutoTokenizer.from_pretrained(args.model_checkpoint)
-    # special_tokens_dict = {'additional_special_tokens': ['<e1_start>', '<e1_end>', '<e2_start>', '<e2_end>', '<l1>', '<l2>', '<l3>', '<l4>', '<l5>', '<l6>']}
-    # tokenizer.add_special_tokens(special_tokens_dict)
+    tokenizer = AutoTokenizer.from_pretrained(args.model_checkpoint)
+    special_tokens_dict = {'additional_special_tokens': ['<e1_start>', '<e1_end>', '<e2_start>', '<e2_end>', '<l1>', '<l2>', '<l3>', '<l4>', '<l5>', '<l6>']}
+    tokenizer.add_special_tokens(special_tokens_dict)
 
-    # train_data = KBPCoref('../../data/train_filtered.json', '../../data/kbp_sent_entity.txt', prompt_type='sn', model_type='longformer', tokenizer=tokenizer, max_length=482)
-    # print_data_statistic('../../data/train_filtered.json')
-    # print(len(train_data))
-    # labels = [train_data[s_idx]['label'] for s_idx in range(len(train_data))]
-    # print('Coref:', labels.count(1), 'non-Coref:', labels.count(0))
-    # for i in range(5):
-    #     print(train_data[i])
-    # print('Testing dataset...')
-    # for _ in tqdm(train_data):
-    #     pass
+    train_data = KBPCoref(
+        '../../data/train_filtered.json', '../../data/EventExtraction/omni_gold_test_pred_args.json', 
+        prompt_type='sm', model_type='longformer', tokenizer=tokenizer, max_length=512
+    )
+    print_data_statistic('../../data/train_filtered.json')
+    print(len(train_data))
+    labels = [train_data[s_idx]['label'] for s_idx in range(len(train_data))]
+    print('Coref:', labels.count(1), 'non-Coref:', labels.count(0))
+    for i in range(5):
+        print(train_data[i])
+    print('Testing dataset...')
+    for _ in tqdm(train_data):
+        pass

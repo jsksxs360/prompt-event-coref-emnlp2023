@@ -25,7 +25,8 @@ def create_event_context(
             if e_before >= 0:
                 if total_length + sentence_lens[e_before] <= max_length:
                     core_context = sentences[e_before]['text'] + ' ' + core_context
-                    e1s_offset, e1e_offset, e2s_offset, e2e_offset = np.asarray([e1s_offset, e1e_offset, e2s_offset, e2e_offset]) + np.full((4,), len(sentences[e_before]['text']) + 1)
+                    e1s_offset, e1e_offset, e2s_offset, e2e_offset = np.asarray([e1s_offset, e1e_offset, e2s_offset, e2e_offset]) + \
+                        np.full((4,), len(sentences[e_before]['text']) + 1)
                     total_length += 1 + sentence_lens[e_before]
                     e_before -= 1
                 else:
@@ -117,23 +118,45 @@ def create_event_context(
 def create_base_template(e1_trigger:str, e2_trigger:str, prompt_type:str, s_tokens:dict) -> dict:
     if prompt_type.startswith('h'): # hard template
         if prompt_type == 'hn':
-            template = f"In the following text, events expressed by {s_tokens['e1s']} {e1_trigger} {s_tokens['e1e']} and {s_tokens['e2s']} {e2_trigger} {s_tokens['e2e']} refer to {s_tokens['mask']} event: "
+            template = (
+                f"In the following text, events expressed by {s_tokens['e1s']} {e1_trigger} {s_tokens['e1e']} "
+                f"and {s_tokens['e2s']} {e2_trigger} {s_tokens['e2e']} refer to {s_tokens['mask']} event: "
+            )
         elif prompt_type == 'hm':
-            template = f"In the following text, the event expressed by {s_tokens['e1s']} {e1_trigger} {s_tokens['e1e']} {s_tokens['mask']} the event expressed by {s_tokens['e2s']} {e2_trigger} {s_tokens['e2e']}: "
+            template = (
+                f"In the following text, the event expressed by {s_tokens['e1s']} {e1_trigger} {s_tokens['e1e']} "
+                f"{s_tokens['mask']} the event expressed by {s_tokens['e2s']} {e2_trigger} {s_tokens['e2e']}: "
+            )
         elif prompt_type == 'hq':
-            template = f"In the following text, do the events expressed by {s_tokens['e1s']} {e1_trigger} {s_tokens['e1e']} and {s_tokens['e2s']} {e2_trigger} {s_tokens['e2e']} refer to the same event? {s_tokens['mask']}. "
+            template = (
+                f"In the following text, do the events expressed by {s_tokens['e1s']} {e1_trigger} {s_tokens['e1e']} "
+                f"and {s_tokens['e2s']} {e2_trigger} {s_tokens['e2e']} refer to the same event? {s_tokens['mask']}. "
+            )
         else:
             raise ValueError(f'Unknown prompt type: {prompt_type}')
         normal_s_tokens = [s_tokens['e1s'], s_tokens['e1e'], s_tokens['e2s'], s_tokens['e2e']]
     elif prompt_type.startswith('s'): # soft template
         if prompt_type == 'sn':
-            template = f"In the following text, {s_tokens['l1']} {s_tokens['e1s']} {e1_trigger} {s_tokens['e1e']} {s_tokens['l2']} {s_tokens['l3']} {s_tokens['e2s']} {e2_trigger} {s_tokens['e2e']} {s_tokens['l4']} {s_tokens['l5']} {s_tokens['mask']} {s_tokens['l6']}: "
-            normal_s_tokens = [s_tokens['e1s'], s_tokens['e1e'], s_tokens['e2s'], s_tokens['e2e'], s_tokens['l1'], s_tokens['l2'], s_tokens['l3'], s_tokens['l4'], s_tokens['l5'], s_tokens['l6']]
+            template = (
+                f"In the following text, {s_tokens['l1']} {s_tokens['e1s']} {e1_trigger} {s_tokens['e1e']} {s_tokens['l2']} "
+                f"{s_tokens['l3']} {s_tokens['e2s']} {e2_trigger} {s_tokens['e2e']} {s_tokens['l4']} {s_tokens['l5']} {s_tokens['mask']} {s_tokens['l6']}: "
+            )
+            normal_s_tokens = [
+                s_tokens['e1s'], s_tokens['e1e'], s_tokens['e2s'], s_tokens['e2e'], s_tokens['l1'], s_tokens['l2'], s_tokens['l3'], s_tokens['l4'], s_tokens['l5'], s_tokens['l6']
+            ]
         elif prompt_type == 'sm':
-            template = f"In the following text, {s_tokens['l1']} {s_tokens['e1s']} {e1_trigger} {s_tokens['e1e']} {s_tokens['l2']} {s_tokens['l5']} {s_tokens['mask']} {s_tokens['l6']} {s_tokens['l3']} {s_tokens['e2s']} {e2_trigger} {s_tokens['e2e']} {s_tokens['l4']}: "
-            normal_s_tokens = [s_tokens['e1s'], s_tokens['e1e'], s_tokens['e2s'], s_tokens['e2e'], s_tokens['l1'], s_tokens['l2'], s_tokens['l3'], s_tokens['l4'], s_tokens['l5'], s_tokens['l6']]
+            template = (
+                f"In the following text, {s_tokens['l1']} {s_tokens['e1s']} {e1_trigger} {s_tokens['e1e']} {s_tokens['l2']} "
+                f"{s_tokens['l5']} {s_tokens['mask']} {s_tokens['l6']} {s_tokens['l3']} {s_tokens['e2s']} {e2_trigger} {s_tokens['e2e']} {s_tokens['l4']}: "
+            )
+            normal_s_tokens = [
+                s_tokens['e1s'], s_tokens['e1e'], s_tokens['e2s'], s_tokens['e2e'], s_tokens['l1'], s_tokens['l2'], s_tokens['l3'], s_tokens['l4'], s_tokens['l5'], s_tokens['l6']
+            ]
         elif prompt_type == 'sq':
-            template = f"In the following text, {s_tokens['l1']} {s_tokens['e1s']} {e1_trigger} {s_tokens['e1e']} {s_tokens['l2']} {s_tokens['l3']} {s_tokens['e2s']} {e2_trigger} {s_tokens['e2e']} {s_tokens['l4']}? {s_tokens['mask']}. "
+            template = (
+                f"In the following text, {s_tokens['l1']} {s_tokens['e1s']} {e1_trigger} {s_tokens['e1e']} {s_tokens['l2']} "
+                f"{s_tokens['l3']} {s_tokens['e2s']} {e2_trigger} {s_tokens['e2e']} {s_tokens['l4']}? {s_tokens['mask']}. "
+            )
             normal_s_tokens = [s_tokens['e1s'], s_tokens['e1e'], s_tokens['e2s'], s_tokens['e2e'], s_tokens['l1'], s_tokens['l2'], s_tokens['l3'], s_tokens['l4']]
         else:
             raise ValueError(f'Unknown prompt type: {prompt_type}')
@@ -143,11 +166,29 @@ def create_base_template(e1_trigger:str, e2_trigger:str, prompt_type:str, s_toke
         'template': template, 
         'sprcial_tokens': normal_s_tokens
     }
-    
+
+def create_knowledge_template(e1_trigger:str, e2_trigger:str, e1_arg_str: str, e2_arg_str: str, prompt_type:str, s_tokens:dict) -> dict:
+    if prompt_type.startswith('s'): # subtype template
+        if prompt_type == 's_hn':
+            template = (
+                f"In the following text, the {s_tokens['mask']} event expressed by {s_tokens['e1s']} {e1_trigger} {s_tokens['e1e']} "
+                f"and the {s_tokens['mask']} event expressed by {s_tokens['e2s']} {e2_trigger} {s_tokens['e2e']} refer to {s_tokens['mask']} event: "
+            )
+        elif prompt_type == 's_hm':
+            template = (
+                f"In the following text, the {s_tokens['mask']} event expressed by {s_tokens['e1s']} {e1_trigger} {s_tokens['e1e']} "
+                f"{s_tokens['mask']} the {s_tokens['mask']} event expressed by {s_tokens['e2s']} {e2_trigger} {s_tokens['e2e']}: "
+            )
+        elif prompt_type == 's_hq':
+            template = (
+                f"In the following text, do the events expressed by {s_tokens['e1s']} {e1_trigger} {s_tokens['e1e']} "
+                f"and {s_tokens['e2s']} {e2_trigger} {s_tokens['e2e']} refer to the same event? {s_tokens['mask']}. "
+            )
+        elif 
 
 def create_prompt(
-    e1_sent_idx:int, e1_sent_start:int, e1_trigger:str,  
-    e2_sent_idx:int, e2_sent_start:int, e2_trigger:str,  
+    e1_sent_idx:int, e1_sent_start:int, e1_trigger:str, e1_arg_str: str, 
+    e2_sent_idx:int, e2_sent_start:int, e2_trigger:str, e2_arg_str: str, 
     sentences:list, sentence_lens:list, 
     prompt_type:str, model_type, tokenizer, max_length:int
     ) -> dict:
@@ -191,4 +232,6 @@ def create_prompt(
             'e2s_offset': e2s_offset, 
             'e2e_offset': e2e_offset
         }
+    elif prompt_type.startswith('s') or prompt_type.startswith('a') or prompt_type.startswith('sa'): # knowledge prompt
+        pass
 
