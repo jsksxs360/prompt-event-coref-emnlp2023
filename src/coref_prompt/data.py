@@ -6,8 +6,8 @@ from utils import create_prompt
 PROMPT_TYPE = [
     'hn', 'hm', 'hq', # base prompts 
     'sn', 'sm', 'sq', # (hard/soft normal/middle/question)
-    's_hn', 'a_hn', 'sa_hn', 's_hm', 'a_hm', 'sa_hm', 's_hq', 'a_hq', 'sa_hq', # knowledge enhanced prompts 
-    's_sn', 'a_sn', 'sa_sn', 's_sm', 'a_sm', 'sa_sm', 's_sq', 'a_sq', 'sa_sq', # (subtype/argument/subtype-argument)
+    't_hn', 'a_hn', 'ta_hn', 't_hm', 'a_hm', 'ta_hm', 't_hq', 'a_hq', 'ta_hq', # knowledge enhanced prompts 
+    't_sn', 'a_sn', 'ta_sn', 't_sm', 'a_sm', 'ta_sm', 't_sq', 'a_sq', 'ta_sq', # (subtype/argument/subtype-argument)
     'm_hs', 'm_ha', 'm_hsa', # mix prompts
     'm_ss', 'm_sa', 'm_ssa'  # (hard/soft subtype/argument/subtype-argument)
 ]
@@ -51,17 +51,6 @@ def get_event_cluster_id(event_id:str, clusters:list) -> str:
             return cluster['hopper_id']
     raise ValueError(f'Unknown event_id: {event_id}')
 
-def convert_args_to_str(args, include_participant=True, include_place=True):
-    arg_str = ''
-    participants, places = [arg for arg in args if arg['role'] == 'participant'], [arg for arg in args if arg['role'] == 'place']
-    if include_participant and len(participants) > 0:
-        participants.sort(key=lambda x: x['global_offset'])
-        arg_str = f"with {', '.join([arg['mention'] for arg in participants])} as participants"
-    if include_place and len(places) > 0:
-        places.sort(key=lambda x: x['global_offset'])
-        arg_str += ' ' + f"at {', '.join([arg['mention'] for arg in places])}"
-    return arg_str.strip()
-
 class KBPCoref(Dataset):
     def __init__(self, data_file:str, arg_file:str, prompt_type:str, model_type:str, tokenizer, max_length:int):
         assert prompt_type in PROMPT_TYPE and model_type in ['bert', 'roberta', 'longformer']
@@ -86,11 +75,11 @@ class KBPCoref(Dataset):
                         event_1, event_2 = events[i], events[j]
                         event_1_cluster_id = get_event_cluster_id(event_1['event_id'], clusters)
                         event_2_cluster_id = get_event_cluster_id(event_2['event_id'], clusters)
-                        event_1_arg_str = convert_args_to_str(self.arg_dict[sample['doc_id']][event_1['start']])
-                        event_2_arg_str = convert_args_to_str(self.arg_dict[sample['doc_id']][event_2['start']])
+                        event_1_args = self.arg_dict[sample['doc_id']][event_1['start']]
+                        event_2_args = self.arg_dict[sample['doc_id']][event_2['start']]
                         prompt_data = create_prompt(
-                            event_1['sent_idx'], event_1['sent_start'], event_1['trigger'], event_1_arg_str, 
-                            event_2['sent_idx'], event_2['sent_start'], event_2['trigger'], event_2_arg_str, 
+                            event_1['sent_idx'], event_1['sent_start'], event_1['trigger'], event_1_args, 
+                            event_2['sent_idx'], event_2['sent_start'], event_2['trigger'], event_2_args, 
                             sentences, sentences_lengths, 
                             prompt_type, self.model_type, self.tokenizer, self.max_length
                         )
@@ -104,12 +93,14 @@ class KBPCoref(Dataset):
                             'e1_subtype_id': subtype2id.get(event_1['subtype'], 0), # 0 - 'other'
                             'e1s_offset': prompt_data['e1s_offset'], 
                             'e1e_offset': prompt_data['e1e_offset'], 
+                            'e1_type_mask_offset': prompt_data['e1_type_mask_offset'], 
                             'e2_id': event_2['start'], # event2
                             'e2_trigger': event_2['trigger'], 
                             'e2_subtype': event_2['subtype'] if event_2['subtype'] in EVENT_SUBTYPES else 'normal', 
                             'e2_subtype_id': subtype2id.get(event_2['subtype'], 0), # 0 - 'other'
                             'e2s_offset': prompt_data['e2s_offset'], 
                             'e2e_offset': prompt_data['e2e_offset'], 
+                            'e2_type_mask_offset': prompt_data['e2_type_mask_offset'], 
                             'label': 1 if event_1_cluster_id == event_2_cluster_id else 0
                         })
         return Data
@@ -151,8 +142,8 @@ if __name__ == '__main__':
     tokenizer.add_special_tokens(special_tokens_dict)
 
     train_data = KBPCoref(
-        '../../data/train_filtered.json', '../../data/EventExtraction/omni_gold_test_pred_args.json', 
-        prompt_type='sm', model_type='longformer', tokenizer=tokenizer, max_length=512
+        '../../data/train_filtered.json', '../../data/EventExtraction/omni_train_pred_args.json', 
+        prompt_type='ta_hn', model_type='longformer', tokenizer=tokenizer, max_length=512
     )
     print_data_statistic('../../data/train_filtered.json')
     print(len(train_data))
@@ -160,6 +151,4 @@ if __name__ == '__main__':
     print('Coref:', labels.count(1), 'non-Coref:', labels.count(0))
     for i in range(5):
         print(train_data[i])
-    print('Testing dataset...')
-    for _ in tqdm(train_data):
-        pass
+    
