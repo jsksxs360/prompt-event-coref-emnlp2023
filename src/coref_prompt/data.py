@@ -67,7 +67,7 @@ class KBPCoref(Dataset):
                 sample = json.loads(line.strip())
                 clusters = sample['clusters']
                 sentences = sample['sentences']
-                sentences_lengths = [len(self.tokenizer(sent['text']).tokens()) for sent in sentences]
+                sentences_lengths = [len(self.tokenizer.tokenize(sent['text'])) for sent in sentences]
                 events = sample['events']
                 # create event pairs
                 for i in range(len(events) - 1):
