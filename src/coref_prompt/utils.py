@@ -43,8 +43,7 @@ def create_event_context(
         core_context = core_context_before + core_context_middle + core_context_after
         total_length = len(tokenizer.tokenize(core_context))
         if total_length > max_length: # cut segment
-            core_context_middle_length = len(tokenizer.tokenize(core_context_middle))
-            before_after_length = (max_length - core_context_middle_length) // 2
+            before_after_length = (max_length - len(tokenizer.tokenize(core_context_middle))) // 2
             core_context_before = tokenizer.decode(tokenizer.encode(core_context_before)[1:-1][-before_after_length:])
             core_context_after = tokenizer.decode(tokenizer.encode(core_context_after)[1:-1][:before_after_length])
             core_context = core_context_before + core_context_middle + core_context_after
@@ -78,7 +77,7 @@ def create_event_context(
         assert core_context[e2e_offset:e2e_offset + len(s_tokens['e2e'])] == s_tokens['e2e']
         return {
             'type': 'same_sent', 
-            'context': core_context, 
+            'context_middle': core_context, 
             'e1s_offset': e1s_offset, 
             'e1e_offset': e1e_offset, 
             'e2s_offset': e2s_offset, 
@@ -375,17 +374,33 @@ def create_multi_template(e1_trigger:str, e2_trigger:str, e1_arg_str: str, e2_ar
         f"{s_tokens['e2s']} {e2_trigger} {s_tokens['e2e']}, and it needs to judge whether they refer to the same or different events: "
     )
     if anchor_temp_type == 'h': # hard template
-        e1_anchor_temp = f"Here {s_tokens['e1s']} {e1_trigger} {s_tokens['e1e']} expresses a {s_tokens['mask']} event{' ' + e1_arg_str if e1_arg_str else ''}"
-        e2_anchor_temp = f"Here {s_tokens['e2s']} {e2_trigger} {s_tokens['e2e']} expresses a {s_tokens['mask']} event{' ' + e2_arg_str if e2_arg_str else ''}"
+        e1_anchor_temp = "Here "
+        e1s_anchor_offset = len(e1_anchor_temp)
+        e1_anchor_temp += f"{s_tokens['e1s']} {e1_trigger} "
+        e1e_anchor_offset = len(e1_anchor_temp)
+        e1_anchor_temp += f"{s_tokens['e1e']} expresses a {s_tokens['mask']} event{' ' + e1_arg_str if e1_arg_str else ''}."
+        e2_anchor_temp = "Here "
+        e2s_anchor_offset = len(e2_anchor_temp)
+        e2_anchor_temp += f"{s_tokens['e2s']} {e2_trigger} "
+        e2e_anchor_offset = len(e2_anchor_temp)
+        e2_anchor_temp += f"{s_tokens['e2e']} expresses a {s_tokens['mask']} event{' ' + e2_arg_str if e2_arg_str else ''}."
     elif anchor_temp_type == 's': # soft template
-        e1_anchor_temp = f"{s_tokens['l1']} {s_tokens['mask']} {s_tokens['e1s']} {e1_trigger} {s_tokens['e1e']}{' ' + e1_arg_str ' ' if e1_arg_str else ' '}{s_tokens['l2']}"
-        e2_anchor_temp = f"{s_tokens['l3']} {s_tokens['mask']} {s_tokens['e2s']} {e2_trigger} {s_tokens['e2e']}{' ' + e2_arg_str ' ' if e2_arg_str else ' '}{s_tokens['l4']}"
+        e1_anchor_temp = f"{s_tokens['l1']} {s_tokens['mask']} "
+        e1s_anchor_offset = len(e1_anchor_temp)
+        e1_anchor_temp += f"{s_tokens['e1s']} {e1_trigger} "
+        e1e_anchor_offset = len(e1_anchor_temp)
+        e1_anchor_temp += f"{s_tokens['e1e']}{' ' + e1_arg_str ' ' if e1_arg_str else ' '}{s_tokens['l2']}."
+        e2_anchor_temp = f"{s_tokens['l3']} {s_tokens['mask']} "
+        e2s_anchor_offset = len(e2_anchor_temp)
+        e2_anchor_temp += f"{s_tokens['e2s']} {e2_trigger} "
+        e2e_anchor_offset = len(e2_anchor_temp)
+        e2_anchor_temp += f"{s_tokens['e2e']}{' ' + e2_arg_str ' ' if e2_arg_str else ' '}{s_tokens['l4']}."
     else:
         raise ValueError(f'Unknown prompt type: {prompt_type}')
     if inference_temp_type == 'hn': 
         infer_template = (
             f"In conclusion, the events expressed by {s_tokens['e1s']} {e1_trigger} {s_tokens['e1e']} and {s_tokens['e2s']} {e2_trigger} {s_tokens['e2e']} "
-            f"have {s_tokens['mask']} event type and {s_tokens['mask']} participants, therefore, they refer to {s_tokens['mask']} event."
+            f"have {s_tokens['mask']} event type and {s_tokens['mask']} participants, so they refer to {s_tokens['mask']} event."
         )
     elif inference_temp_type == 'hm': 
         infer_template = (
@@ -404,10 +419,13 @@ def create_multi_template(e1_trigger:str, e2_trigger:str, e1_arg_str: str, e2_ar
     ]
     return {
         'prefix_template': prefix_template, 
-        'e1_anchor_temp': e1_anchor_temp, 
-        'e1s_anchor_offset': 
-        'e2_anchor_temp': e2_anchor_temp, 
-        'e2s_anchor_offset': 
+        'e1_anchor_template': e1_anchor_temp, 
+        'e2_anchor_template': e2_anchor_temp, 
+        'infer_template': infer_template, 
+        'e1s_anchor_offset': e1s_anchor_offset, 
+        'e1e_anchor_offset': e1e_anchor_offset, 
+        'e2s_anchor_offset': e2s_anchor_offset, 
+        'e2e_anchor_offset': e2e_anchor_offset, 
         'special_tokens': normal_s_tokens
     }
 
@@ -456,11 +474,12 @@ def create_prompt(
     if prompt_type.startswith('h') or prompt_type.startswith('s'): # base prompt
         template_data = create_base_template(e1_trigger, e2_trigger, prompt_type, special_token_dict)
         assert set(template_data['special_tokens']).issubset(set(tokenizer.additional_special_tokens))
+        template_length = len(tokenizer.tokenize(template_data['template'])) + 3
         context_data = create_event_context(
             e1_sent_idx, e1_sent_start, e1_trigger, 
             e2_sent_idx, e2_sent_start, e2_trigger,  
             sentences, sentence_lens, 
-            special_token_dict, tokenizer, max_length - len(tokenizer.tokenize(template_data['template'])) - 3
+            special_token_dict, tokenizer, max_length - template_length
         )
         e1s_offset, e1e_offset, e2s_offset, e2e_offset = context_data['e1s_offset'], context_data['e1e_offset'], context_data['e2s_offset'], context_data['e2e_offset']
         if context_data['type'] == 'same_sent': # two events in the same sentence
@@ -490,11 +509,12 @@ def create_prompt(
         e1_arg_str, e2_arg_str = convert_args_to_str(e1_args), convert_args_to_str(e2_args)
         template_data = create_knowledge_template(e1_trigger, e2_trigger, e1_arg_str, e2_arg_str, prompt_type, special_token_dict)
         assert set(template_data['special_tokens']).issubset(set(tokenizer.additional_special_tokens))
+        template_length = len(tokenizer.tokenize(template_data['template'])) + 3
         context_data = create_event_context(
             e1_sent_idx, e1_sent_start, e1_trigger, 
             e2_sent_idx, e2_sent_start, e2_trigger,  
             sentences, sentence_lens, 
-            special_token_dict, tokenizer, max_length - len(tokenizer(template_data['template']).tokens()) - 1
+            special_token_dict, tokenizer, max_length - template_length
         )
         e1s_offset, e1e_offset, e2s_offset, e2e_offset = context_data['e1s_offset'], context_data['e1e_offset'], context_data['e2s_offset'], context_data['e2e_offset']
         if context_data['type'] == 'same_sent': # two events in the same sentence
@@ -528,6 +548,42 @@ def create_prompt(
             'e2_type_mask_offset': e2_type_mask_offset
         }
     elif prompt_type.startswith('m'): # multi prompt
-        pass
-            
-
+        e1_arg_str, e2_arg_str = convert_args_to_str(e1_args, use_filter=False), convert_args_to_str(e2_args, use_filter=False)
+        template_data = create_multi_template(e1_trigger, e2_trigger, e1_arg_str, e2_arg_str, prompt_type, special_token_dict)
+        template_length = (
+            len(tokenizer.tokenize(template_data['prefix_template'])) + 
+            len(tokenizer.tokenize(template_data['e1_anchor_template'])) + 
+            len(tokenizer.tokenize(template_data['e2_anchor_template'])) + 
+            len(tokenizer.tokenize(template_data['infer_template'])) + 
+            7
+        )
+        {
+            'prefix_template': prefix_template, 
+            'e1_anchor_template': e1_anchor_temp, 
+            'e2_anchor_template': e2_anchor_temp, 
+            'infer_template': infer_template, 
+            'e1s_anchor_offset': e1s_anchor_offset, 
+            'e1e_anchor_offset': e1e_anchor_offset, 
+            'e2s_anchor_offset': e2s_anchor_offset, 
+            'e2e_anchor_offset': e2e_anchor_offset, 
+            'special_tokens': normal_s_tokens
+        }
+        assert set(template_data['special_tokens']).issubset(set(tokenizer.additional_special_tokens))
+        context_data = create_event_context(
+            e1_sent_idx, e1_sent_start, e1_trigger, 
+            e2_sent_idx, e2_sent_start, e2_trigger,  
+            sentences, sentence_lens, 
+            special_token_dict, tokenizer, max_length - template_length
+        )
+        e1s_offset, e1e_offset = template_data['e1s_anchor_offset'], template_data['e1e_anchor_offset']
+        e2s_offset, e2e_offset = template_data['e2s_anchor_offset'], template_data['e2e_anchor_offset']
+        if context_data['type'] == 'same_sent': # two events in the same sentence
+            prompt = template_data['prefix_template'] + context_data['context'] + ' '
+            e1s_offset, e1e_offset = np.asarray([e1s_offset, e1e_offset]) + np.full((2,), len(prompt))
+            prompt += template_data['e1_anchor_template'] + ' '
+            e2s_offset, e2e_offset = np.asarray([e2s_offset, e2e_offset]) + np.full((2,), len(prompt))
+            prompt += template_data['e2_anchor_template'] + ' ' + template_data['infer_template']
+        else: # two events in different sentences
+            prompt = template_data['template'] + context_data['e1_context'] + ' ' + context_data['e2_context']
+            e1s_offset, e1e_offset = np.asarray([e1s_offset, e1e_offset]) + np.full((2,), len(template_data['template']))
+            e2s_offset, e2e_offset = np.asarray([e2s_offset, e2e_offset]) + np.full((2,), len(template_data['template']) + len(context_data['e1_context']) + 1)
