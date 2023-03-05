@@ -145,7 +145,7 @@ if __name__ == '__main__':
 
     train_data = KBPCoref(
         '../../data/train_filtered.json', '../../data/EventExtraction/omni_train_pred_args.json', 
-        prompt_type='ta_hn', model_type='longformer', tokenizer=tokenizer, max_length=512
+        prompt_type='hn', model_type='longformer', tokenizer=tokenizer, max_length=512
     )
     print_data_statistic('../../data/train_filtered.json')
     print(len(train_data))

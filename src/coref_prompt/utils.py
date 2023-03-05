@@ -538,7 +538,10 @@ def create_prompt(
                 context_data['e1_before_context'] + context_data['e1_core_context'] + context_data['e1_after_context'] + ' ' + 
                 context_data['e2_before_context'] + context_data['e2_core_context'] + context_data['e2_after_context']
             )
-            e1s_offset, e1e_offset = np.asarray([e1s_offset, e1e_offset]) + np.full((2,), len(template_data['template'] + context_data['e1_core_context']))
+            e1s_offset, e1e_offset = (
+                np.asarray([e1s_offset, e1e_offset]) + 
+                np.full((2,), len(template_data['template'] + context_data['e1_before_context']))
+            )
             e2s_offset, e2e_offset = (
                 np.asarray([e2s_offset, e2e_offset]) + 
                 np.full((2,), len(template_data['template']) + len(context_data['e1_before_context']) + 
@@ -546,6 +549,7 @@ def create_prompt(
                     len(context_data['e2_before_context']) + 1
                 )
             )
+        assert len(tokenizer(prompt).tokens()) <= max_length
         mask_offset = prompt.find(special_token_dict['mask'])
         assert prompt[mask_offset:mask_offset + len(special_token_dict['mask'])] == special_token_dict['mask']
         assert prompt[e1s_offset:e1e_offset] == special_token_dict['e1s'] + ' ' + e1_trigger + ' '
@@ -589,7 +593,10 @@ def create_prompt(
                 context_data['e1_before_context'] + context_data['e1_core_context'] + context_data['e1_after_context'] + ' ' + 
                 context_data['e2_before_context'] + context_data['e2_core_context'] + context_data['e2_after_context']
             )
-            e1s_offset, e1e_offset = np.asarray([e1s_offset, e1e_offset]) + np.full((2,), len(template_data['template'] + context_data['e1_before_context']))
+            e1s_offset, e1e_offset = (
+                np.asarray([e1s_offset, e1e_offset]) + 
+                np.full((2,), len(template_data['template'] + context_data['e1_before_context']))
+            )
             e2s_offset, e2e_offset = (
                 np.asarray([e2s_offset, e2e_offset]) + 
                 np.full((2,), len(template_data['template']) + len(context_data['e1_before_context']) + 
@@ -597,6 +604,7 @@ def create_prompt(
                     len(context_data['e2_before_context']) + 1
                 )
             )
+        assert len(tokenizer(prompt).tokens()) <= max_length
         if prompt_type.startswith('t'):
             mask_offsets = list(findall(special_token_dict['mask'], prompt))
             assert len(mask_offsets) == 3
@@ -656,6 +664,7 @@ def create_prompt(
             )
             e2s_offset, e2e_offset = np.asarray([e2s_offset, e2e_offset]) + np.full((2,), len(prompt))
             prompt += template_data['e2_anchor_template'] + context_data['e2_after_context'] + ' ' + template_data['infer_template']
+        assert len(tokenizer(prompt).tokens()) <= max_length
         mask_offsets = list(findall(special_token_dict['mask'], prompt))
         assert len(mask_offsets) == 5
         e1_type_mask_offset, e2_type_mask_offset, type_match_mask_offset, arg_match_mask_offset, mask_offset = mask_offsets
