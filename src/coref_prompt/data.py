@@ -6,8 +6,8 @@ from utils import create_prompt
 PROMPT_TYPE = [
     'hn', 'hm', 'hq', # base prompts 
     'sn', 'sm', 'sq', # (hard/soft normal/middle/question)
-    't_hn', 'a_hn', 'ta_hn', 't_hm', 'a_hm', 'ta_hm', 't_hq', 'a_hq', 'ta_hq', # knowledge enhanced prompts 
-    't_sn', 'a_sn', 'ta_sn', 't_sm', 'a_sm', 'ta_sm', 't_sq', 'a_sq', 'ta_sq', # (subtype/argument/subtype-argument)
+    't_hn', 'ta_hn', 't_hm', 'ta_hm', 't_hq', 'ta_hq', # knowledge enhanced prompts 
+    't_sn', 'ta_sn', 't_sm', 'ta_sm', 't_sq', 'ta_sq', # (subtype/subtype-argument)
     'm_hs_hn', 'm_hs_hm', 'm_hs_hq', 'm_hsa_hn', 'm_hsa_hm', 'm_hsa_hq', # mix prompts
     'm_ss_hn', 'm_ss_hm', 'm_ss_hq', 'm_ssa_hn', 'm_ssa_hm', 'm_ssa_hq'  # (hard/soft subtype/argument/subtype-argument)
 ]
@@ -153,4 +153,3 @@ if __name__ == '__main__':
     print('Coref:', labels.count(1), 'non-Coref:', labels.count(0))
     for i in range(5):
         print(train_data[i])
-    

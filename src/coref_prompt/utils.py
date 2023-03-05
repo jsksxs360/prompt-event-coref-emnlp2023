@@ -79,7 +79,6 @@ def create_event_context(
                         e_after = len(sentences)
                 if e_before == -1 and e_after == len(sentences):
                     break
-        assert len(tokenizer.tokenize(before_context + core_context + after_context)) <= max_length
         assert core_context[e1s_offset:e1e_offset] == s_tokens['e1s'] + ' ' + e1_trigger + ' '
         assert core_context[e1e_offset:e1e_offset + len(s_tokens['e1e'])] == s_tokens['e1e']
         assert core_context[e2s_offset:e2e_offset] == s_tokens['e2s'] + ' ' + e2_trigger + ' '
@@ -162,8 +161,6 @@ def create_event_context(
                         e2_after = len(sentences)
                 if e1_before == -1 and e2_after == len(sentences) and ((e1_after_dead and e2_before_dead) or e1_after > e2_before):
                     break
-        assert (len(tokenizer.tokenize(e1_before_context + e1_core_context + e1_after_context)) + 
-                len(tokenizer.tokenize(e2_before_context + e2_core_context + e2_after_context))) <= max_length
         assert e1_core_context[e1s_offset:e1e_offset] == s_tokens['e1s'] + ' ' + e1_trigger + ' '
         assert e1_core_context[e1e_offset:e1e_offset + len(s_tokens['e1e'])] == s_tokens['e1e']
         assert e2_core_context[e2s_offset:e2e_offset] == s_tokens['e2s'] + ' ' + e2_trigger + ' '
@@ -549,7 +546,6 @@ def create_prompt(
                     len(context_data['e2_before_context']) + 1
                 )
             )
-        assert len(tokenizer(prompt).tokens()) <= max_length
         mask_offset = prompt.find(special_token_dict['mask'])
         assert prompt[mask_offset:mask_offset + len(special_token_dict['mask'])] == special_token_dict['mask']
         assert prompt[e1s_offset:e1e_offset] == special_token_dict['e1s'] + ' ' + e1_trigger + ' '
@@ -568,7 +564,7 @@ def create_prompt(
             'e2e_offset': e2e_offset, 
             'e2_type_mask_offset': -1
         }
-    elif prompt_type.startswith('t') or prompt_type.startswith('a'): # knowledge prompt
+    elif prompt_type.startswith('t'): # knowledge prompt
         e1_arg_str, e2_arg_str = convert_args_to_str(e1_args), convert_args_to_str(e2_args)
         template_data = create_knowledge_template(e1_trigger, e2_trigger, e1_arg_str, e2_arg_str, prompt_type, special_token_dict)
         assert set(template_data['special_tokens']).issubset(set(tokenizer.additional_special_tokens))
@@ -604,15 +600,14 @@ def create_prompt(
                     len(context_data['e2_before_context']) + 1
                 )
             )
-        assert len(tokenizer(prompt).tokens()) <= max_length
-        if prompt_type.startswith('t'):
-            mask_offsets = list(findall(special_token_dict['mask'], prompt))
-            assert len(mask_offsets) == 3
+        mask_offsets = list(findall(special_token_dict['mask'], prompt))
+        assert len(mask_offsets) == 3
+        if 'm' in prompt_type: # middle template
+            e1_type_mask_offset, mask_offset, e2_type_mask_offset = mask_offsets
+        else:
             e1_type_mask_offset, e2_type_mask_offset, mask_offset = mask_offsets
-            assert prompt[e1_type_mask_offset:e1_type_mask_offset + len(special_token_dict['mask'])] == special_token_dict['mask']
-            assert prompt[e2_type_mask_offset:e2_type_mask_offset + len(special_token_dict['mask'])] == special_token_dict['mask']
-        else: 
-            e1_type_mask_offset, e2_type_mask_offset, mask_offset = -1, -1, prompt.find(special_token_dict['mask'])
+        assert prompt[e1_type_mask_offset:e1_type_mask_offset + len(special_token_dict['mask'])] == special_token_dict['mask']
+        assert prompt[e2_type_mask_offset:e2_type_mask_offset + len(special_token_dict['mask'])] == special_token_dict['mask']
         assert prompt[mask_offset:mask_offset + len(special_token_dict['mask'])] == special_token_dict['mask']
         assert prompt[e1s_offset:e1e_offset] == special_token_dict['e1s'] + ' ' + e1_trigger + ' '
         assert prompt[e1e_offset:e1e_offset + len(special_token_dict['e1e'])] == special_token_dict['e1e']
@@ -664,7 +659,6 @@ def create_prompt(
             )
             e2s_offset, e2e_offset = np.asarray([e2s_offset, e2e_offset]) + np.full((2,), len(prompt))
             prompt += template_data['e2_anchor_template'] + context_data['e2_after_context'] + ' ' + template_data['infer_template']
-        assert len(tokenizer(prompt).tokens()) <= max_length
         mask_offsets = list(findall(special_token_dict['mask'], prompt))
         assert len(mask_offsets) == 5
         e1_type_mask_offset, e2_type_mask_offset, type_match_mask_offset, arg_match_mask_offset, mask_offset = mask_offsets
