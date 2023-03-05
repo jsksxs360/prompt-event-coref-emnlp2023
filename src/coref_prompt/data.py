@@ -8,8 +8,8 @@ PROMPT_TYPE = [
     'sn', 'sm', 'sq', # (hard/soft normal/middle/question)
     't_hn', 'a_hn', 'ta_hn', 't_hm', 'a_hm', 'ta_hm', 't_hq', 'a_hq', 'ta_hq', # knowledge enhanced prompts 
     't_sn', 'a_sn', 'ta_sn', 't_sm', 'a_sm', 'ta_sm', 't_sq', 'a_sq', 'ta_sq', # (subtype/argument/subtype-argument)
-    'm_hs', 'm_ha', 'm_hsa', # mix prompts
-    'm_ss', 'm_sa', 'm_ssa'  # (hard/soft subtype/argument/subtype-argument)
+    'm_hs_hn', 'm_hs_hm', 'm_hs_hq', 'm_hsa_hn', 'm_hsa_hm', 'm_hsa_hq', # mix prompts
+    'm_ss_hn', 'm_ss_hm', 'm_ss_hq', 'm_ssa_hn', 'm_ssa_hm', 'm_ssa_hq'  # (hard/soft subtype/argument/subtype-argument)
 ]
 
 EVENT_SUBTYPES = [ # 18 subtypes
@@ -87,6 +87,8 @@ class KBPCoref(Dataset):
                             'id': sample['doc_id'], 
                             'prompt': prompt_data['prompt'], 
                             'mask_offset': prompt_data['mask_offset'], 
+                            'type_match_mask_offset': prompt_data['type_match_mask_offset'], 
+                            'arg_match_mask_offset': prompt_data['arg_match_mask_offset'], 
                             'e1_id': event_1['start'], # event1
                             'e1_trigger': event_1['trigger'], 
                             'e1_subtype': event_1['subtype'] if event_1['subtype'] in EVENT_SUBTYPES else 'normal', 

@@ -25,6 +25,16 @@ def create_event_context(
         tokenizer of the chosen PTM
     max_length:
         max total token numbers of the two segments (not include [CLS], [SEP], etc.)
+    # Return
+    type: context type, 'same_sent' or 'diff_sent', two events in the same/different sentence
+    (e1/e2_)core_context: 
+        host sentence that contains the event
+    (e1/e2_)before_context: 
+        sentences before the host sentence
+    (e1/e2_)after_context: 
+        sentences after the host sentence
+    e1s_core_offset, e1e_core_offset, e2s_core_offset, e2e_core_offset: 
+        offsets of event triggers in the host sentence
     '''
     if e1_sent_idx == e2_sent_idx: # two events in the same sentence
         assert e1_sent_start < e2_sent_start
@@ -42,6 +52,7 @@ def create_event_context(
         # segment contain the two events
         core_context = core_context_before + core_context_middle + core_context_after
         total_length = len(tokenizer.tokenize(core_context))
+        before_context, after_context = '', ''
         if total_length > max_length: # cut segment
             before_after_length = (max_length - len(tokenizer.tokenize(core_context_middle))) // 2
             core_context_before = tokenizer.decode(tokenizer.encode(core_context_before)[1:-1][-before_after_length:])
@@ -54,117 +65,121 @@ def create_event_context(
             while True:
                 if e_before >= 0:
                     if total_length + sentence_lens[e_before] <= max_length:
-                        core_context = sentences[e_before]['text'] + ' ' + core_context
-                        e1s_offset, e1e_offset, e2s_offset, e2e_offset = np.asarray([e1s_offset, e1e_offset, e2s_offset, e2e_offset]) + \
-                            np.full((4,), len(sentences[e_before]['text']) + 1)
+                        before_context = sentences[e_before]['text'] + ' ' + before_context
                         total_length += 1 + sentence_lens[e_before]
                         e_before -= 1
                     else:
                         e_before = -1
                 if e_after < len(sentences):
                     if total_length + sentence_lens[e_after] <= max_length:
-                        core_context += ' ' + sentences[e_after]['text']
+                        after_context += ' ' + sentences[e_after]['text']
                         total_length += 1 + sentence_lens[e_after]
                         e_after += 1
                     else:
                         e_after = len(sentences)
                 if e_before == -1 and e_after == len(sentences):
                     break
-        assert len(tokenizer.tokenize(core_context)) <= max_length
+        assert len(tokenizer.tokenize(before_context + core_context + after_context)) <= max_length
         assert core_context[e1s_offset:e1e_offset] == s_tokens['e1s'] + ' ' + e1_trigger + ' '
         assert core_context[e1e_offset:e1e_offset + len(s_tokens['e1e'])] == s_tokens['e1e']
         assert core_context[e2s_offset:e2e_offset] == s_tokens['e2s'] + ' ' + e2_trigger + ' '
         assert core_context[e2e_offset:e2e_offset + len(s_tokens['e2e'])] == s_tokens['e2e']
         return {
             'type': 'same_sent', 
-            'context_middle': core_context, 
-            'e1s_offset': e1s_offset, 
-            'e1e_offset': e1e_offset, 
-            'e2s_offset': e2s_offset, 
-            'e2e_offset': e2e_offset
+            'core_context': core_context, 
+            'before_context': before_context, 
+            'after_context': after_context, 
+            'e1s_core_offset': e1s_offset, 
+            'e1e_core_offset': e1e_offset, 
+            'e2s_core_offset': e2s_offset, 
+            'e2e_core_offset': e2e_offset
         }
     else: # two events in different sentences
         e1_sent, e2_sent = sentences[e1_sent_idx]['text'], sentences[e2_sent_idx]['text']
         # e1 source sentence
-        e1_context_before = f"{e1_sent[:e1_sent_start]}"
+        e1_core_context_before = f"{e1_sent[:e1_sent_start]}"
+        e1_core_context_after = f"{e1_sent[e1_sent_start + len(e1_trigger):]}"
         e1s_offset = 0
-        e1_context_middle = f"{s_tokens['e1s']} {e1_trigger} "
-        e1e_offset = len(e1_context_middle)
-        e1_context_middle += f"{s_tokens['e1e']}"
-        e1_context_after = f"{e1_sent[e1_sent_start + len(e1_trigger):]}"
+        e1_core_context_middle = f"{s_tokens['e1s']} {e1_trigger} "
+        e1e_offset = len(e1_core_context_middle)
+        e1_core_context_middle += f"{s_tokens['e1e']}"
         # e2 source sentence
-        e2_context_before = f"{e2_sent[:e2_sent_start]}"
+        e2_core_context_before = f"{e2_sent[:e2_sent_start]}"
+        e2_core_context_after = f"{e2_sent[e2_sent_start + len(e2_trigger):]}"
         e2s_offset = 0
-        e2_context_middle = f"{s_tokens['e2s']} {e2_trigger} "
-        e2e_offset = len(e2_context_middle)
-        e2_context_middle += f"{s_tokens['e2e']}"
-        e2_context_after = f"{e2_sent[e2_sent_start + len(e2_trigger):]}"
-        
-        e1_context = e1_context_before + e1_context_middle + e1_context_after
-        e2_context = e2_context_before + e2_context_middle + e2_context_after
-        total_length = len(tokenizer.tokenize(e1_context)) + len(tokenizer.tokenize(e2_context))
+        e2_core_context_middle = f"{s_tokens['e2s']} {e2_trigger} "
+        e2e_offset = len(e2_core_context_middle)
+        e2_core_context_middle += f"{s_tokens['e2e']}"
+        # segment contain the two events
+        e1_core_context = e1_core_context_before + e1_core_context_middle + e1_core_context_after
+        e2_core_context = e2_core_context_before + e2_core_context_middle + e2_core_context_after
+        total_length = len(tokenizer.tokenize(e1_core_context)) + len(tokenizer.tokenize(e2_core_context))
+        e1_before_context, e1_after_context, e2_before_context, e2_after_context = '', '', '', ''
         if total_length > max_length:
-            e1_e2_middle_length = len(tokenizer(e1_context_middle).tokens()) + len(tokenizer(e2_context_middle).tokens())
+            e1_e2_middle_length = len(tokenizer.tokenize(e1_core_context_middle)) + len(tokenizer.tokenize(e2_core_context_middle))
             before_after_length = (max_length - e1_e2_middle_length) // 4
-            e1_context_before = tokenizer.decode(tokenizer.encode(e1_context_before)[1:-1][-before_after_length:])
-            e1_context_after = tokenizer.decode(tokenizer.encode(e1_context_after)[1:-1][:before_after_length])
-            e1_context = e1_context_before + e1_context_middle + e1_context_after
-            e1s_offset, e1e_offset = np.asarray([e1s_offset, e1e_offset]) + np.full((2,), len(e1_context_before))
-            e2_context_before = tokenizer.decode(tokenizer.encode(e2_context_before)[1:-1][-before_after_length:])
-            e2_context_after = tokenizer.decode(tokenizer.encode(e2_context_after)[1:-1][:before_after_length])
-            e2_context = e2_context_before + e2_context_middle + e2_context_after
-            e2s_offset, e2e_offset = np.asarray([e2s_offset, e2e_offset]) + np.full((2,), len(e2_context_before))
+            e1_core_context_before = tokenizer.decode(tokenizer.encode(e1_core_context_before)[1:-1][-before_after_length:])
+            e1_core_context_after = tokenizer.decode(tokenizer.encode(e1_core_context_after)[1:-1][:before_after_length])
+            e1_core_context = e1_core_context_before + e1_core_context_middle + e1_core_context_after
+            e1s_offset, e1e_offset = np.asarray([e1s_offset, e1e_offset]) + np.full((2,), len(e1_core_context_before))
+            e2_core_context_before = tokenizer.decode(tokenizer.encode(e2_core_context_before)[1:-1][-before_after_length:])
+            e2_core_context_after = tokenizer.decode(tokenizer.encode(e2_core_context_after)[1:-1][:before_after_length])
+            e2_core_context = e2_core_context_before + e2_core_context_middle + e2_core_context_after
+            e2s_offset, e2e_offset = np.asarray([e2s_offset, e2e_offset]) + np.full((2,), len(e2_core_context_before))
         else: # add other sentences
-            e1s_offset, e1e_offset = np.asarray([e1s_offset, e1e_offset]) + np.full((2,), len(e1_context_before))
-            e2s_offset, e2e_offset = np.asarray([e2s_offset, e2e_offset]) + np.full((2,), len(e2_context_before))
+            e1s_offset, e1e_offset = np.asarray([e1s_offset, e1e_offset]) + np.full((2,), len(e1_core_context_before))
+            e2s_offset, e2e_offset = np.asarray([e2s_offset, e2e_offset]) + np.full((2,), len(e2_core_context_before))
             e1_before, e1_after, e2_before, e2_after = e1_sent_idx - 1, e1_sent_idx + 1, e2_sent_idx - 1, e2_sent_idx + 1
             while True:
                 e1_after_dead, e2_before_dead = False, False
                 if e1_before >= 0:
                     if total_length + sentence_lens[e1_before] <= max_length:
-                        e1_context = sentences[e1_before]['text'] + ' ' + e1_context
-                        e1s_offset, e1e_offset = np.asarray([e1s_offset, e1e_offset]) + np.full((2,), len(sentences[e1_before]['text']) + 1)
+                        e1_before_context = sentences[e1_before]['text'] + ' ' + e1_before_context
                         total_length += 1 + sentence_lens[e1_before]
                         e1_before -= 1
                     else:
                         e1_before = -1
                 if e1_after <= e2_before:
                     if total_length + sentence_lens[e1_after] <= max_length:
-                        e1_context += ' ' + sentences[e1_after]['text']
+                        e1_after_context += ' ' + sentences[e1_after]['text']
                         total_length += 1 + sentence_lens[e1_after]
                         e1_after += 1
                     else:
                         e1_after_dead = True
                 if e2_before >= e1_after:
                     if total_length + sentence_lens[e2_before] <= max_length:
-                        e2_context = sentences[e2_before]['text'] + ' ' + e2_context
-                        e2s_offset, e2e_offset = np.asarray([e2s_offset, e2e_offset]) + np.full((2,), len(sentences[e2_before]['text']) + 1)
+                        e2_before_context = sentences[e2_before]['text'] + ' ' + e2_before_context
                         total_length += 1 + sentence_lens[e2_before]
                         e2_before -= 1
                     else:
                         e2_before_dead = True
                 if e2_after < len(sentences):
                     if total_length + sentence_lens[e2_after] <= max_length:
-                        e2_context += ' ' + sentences[e2_after]['text']
+                        e2_after_context += ' ' + sentences[e2_after]['text']
                         total_length += 1 + sentence_lens[e2_after]
                         e2_after += 1
                     else:
                         e2_after = len(sentences)
                 if e1_before == -1 and e2_after == len(sentences) and ((e1_after_dead and e2_before_dead) or e1_after > e2_before):
                     break
-        assert len(tokenizer.tokenize(e1_context)) + len(tokenizer.tokenize(e2_context)) <= max_length
-        assert e1_context[e1s_offset:e1e_offset] == s_tokens['e1s'] + ' ' + e1_trigger + ' '
-        assert e1_context[e1e_offset:e1e_offset + len(s_tokens['e1e'])] == s_tokens['e1e']
-        assert e2_context[e2s_offset:e2e_offset] == s_tokens['e2s'] + ' ' + e2_trigger + ' '
-        assert e2_context[e2e_offset:e2e_offset + len(s_tokens['e2e'])] == s_tokens['e2e']
+        assert (len(tokenizer.tokenize(e1_before_context + e1_core_context + e1_after_context)) + 
+                len(tokenizer.tokenize(e2_before_context + e2_core_context + e2_after_context))) <= max_length
+        assert e1_core_context[e1s_offset:e1e_offset] == s_tokens['e1s'] + ' ' + e1_trigger + ' '
+        assert e1_core_context[e1e_offset:e1e_offset + len(s_tokens['e1e'])] == s_tokens['e1e']
+        assert e2_core_context[e2s_offset:e2e_offset] == s_tokens['e2s'] + ' ' + e2_trigger + ' '
+        assert e2_core_context[e2e_offset:e2e_offset + len(s_tokens['e2e'])] == s_tokens['e2e']
         return {
             'type': 'diff_sent', 
-            'e1_context': e1_context, 
-            'e1s_offset': e1s_offset, 
-            'e1e_offset': e1e_offset, 
-            'e2_context': e2_context, 
-            'e2s_offset': e2s_offset, 
-            'e2e_offset': e2e_offset
+            'e1_core_context': e1_core_context, 
+            'e1_before_context': e1_before_context, 
+            'e1_after_context': e1_after_context, 
+            'e1s_core_offset': e1s_offset, 
+            'e1e_core_offset': e1e_offset, 
+            'e2_core_context': e2_core_context, 
+            'e2_before_context': e2_before_context, 
+            'e2_after_context': e2_after_context, 
+            'e2s_core_offset': e2s_offset, 
+            'e2e_core_offset': e2e_offset
         }
 
 def create_base_template(e1_trigger:str, e2_trigger:str, prompt_type:str, s_tokens:dict) -> dict:
@@ -373,28 +388,56 @@ def create_multi_template(e1_trigger:str, e2_trigger:str, e1_arg_str: str, e2_ar
         f"In the following text, the focus is on the events expressed by {s_tokens['e1s']} {e1_trigger} {s_tokens['e1e']} and "
         f"{s_tokens['e2s']} {e2_trigger} {s_tokens['e2e']}, and it needs to judge whether they refer to the same or different events: "
     )
-    if anchor_temp_type == 'h': # hard template
-        e1_anchor_temp = "Here "
-        e1s_anchor_offset = len(e1_anchor_temp)
-        e1_anchor_temp += f"{s_tokens['e1s']} {e1_trigger} "
-        e1e_anchor_offset = len(e1_anchor_temp)
-        e1_anchor_temp += f"{s_tokens['e1e']} expresses a {s_tokens['mask']} event{' ' + e1_arg_str if e1_arg_str else ''}."
-        e2_anchor_temp = "Here "
-        e2s_anchor_offset = len(e2_anchor_temp)
-        e2_anchor_temp += f"{s_tokens['e2s']} {e2_trigger} "
-        e2e_anchor_offset = len(e2_anchor_temp)
-        e2_anchor_temp += f"{s_tokens['e2e']} expresses a {s_tokens['mask']} event{' ' + e2_arg_str if e2_arg_str else ''}."
-    elif anchor_temp_type == 's': # soft template
-        e1_anchor_temp = f"{s_tokens['l1']} {s_tokens['mask']} "
-        e1s_anchor_offset = len(e1_anchor_temp)
-        e1_anchor_temp += f"{s_tokens['e1s']} {e1_trigger} "
-        e1e_anchor_offset = len(e1_anchor_temp)
-        e1_anchor_temp += f"{s_tokens['e1e']}{' ' + e1_arg_str ' ' if e1_arg_str else ' '}{s_tokens['l2']}."
-        e2_anchor_temp = f"{s_tokens['l3']} {s_tokens['mask']} "
-        e2s_anchor_offset = len(e2_anchor_temp)
-        e2_anchor_temp += f"{s_tokens['e2s']} {e2_trigger} "
-        e2e_anchor_offset = len(e2_anchor_temp)
-        e2_anchor_temp += f"{s_tokens['e2e']}{' ' + e2_arg_str ' ' if e2_arg_str else ' '}{s_tokens['l4']}."
+    if anchor_temp_type.startswith('h'): # hard template
+        if anchor_temp_type == 'hsa': 
+            e1_anchor_temp = "Here "
+            e1s_anchor_offset = len(e1_anchor_temp)
+            e1_anchor_temp += f"{s_tokens['e1s']} {e1_trigger} "
+            e1e_anchor_offset = len(e1_anchor_temp)
+            e1_anchor_temp += f"{s_tokens['e1e']} expresses a {s_tokens['mask']} event{' ' + e1_arg_str if e1_arg_str else ''}."
+            e2_anchor_temp = "Here "
+            e2s_anchor_offset = len(e2_anchor_temp)
+            e2_anchor_temp += f"{s_tokens['e2s']} {e2_trigger} "
+            e2e_anchor_offset = len(e2_anchor_temp)
+            e2_anchor_temp += f"{s_tokens['e2e']} expresses a {s_tokens['mask']} event{' ' + e2_arg_str if e2_arg_str else ''}."
+        elif anchor_temp_type == 'hs': 
+            e1_anchor_temp = "Here "
+            e1s_anchor_offset = len(e1_anchor_temp)
+            e1_anchor_temp += f"{s_tokens['e1s']} {e1_trigger} "
+            e1e_anchor_offset = len(e1_anchor_temp)
+            e1_anchor_temp += f"{s_tokens['e1e']} expresses a {s_tokens['mask']} event."
+            e2_anchor_temp = "Here "
+            e2s_anchor_offset = len(e2_anchor_temp)
+            e2_anchor_temp += f"{s_tokens['e2s']} {e2_trigger} "
+            e2e_anchor_offset = len(e2_anchor_temp)
+            e2_anchor_temp += f"{s_tokens['e2e']} expresses a {s_tokens['mask']} event."
+        else:
+            raise ValueError(f'Unknown prompt type: {prompt_type}')
+    elif anchor_temp_type.startswith('s'): # soft template
+        if anchor_temp_type == 'ssa': 
+            e1_anchor_temp = f"{s_tokens['l1']} {s_tokens['mask']} "
+            e1s_anchor_offset = len(e1_anchor_temp)
+            e1_anchor_temp += f"{s_tokens['e1s']} {e1_trigger} "
+            e1e_anchor_offset = len(e1_anchor_temp)
+            e1_anchor_temp += f"{s_tokens['e1e']}{' ' + e1_arg_str + ' ' if e1_arg_str else ' '}{s_tokens['l2']}."
+            e2_anchor_temp = f"{s_tokens['l3']} {s_tokens['mask']} "
+            e2s_anchor_offset = len(e2_anchor_temp)
+            e2_anchor_temp += f"{s_tokens['e2s']} {e2_trigger} "
+            e2e_anchor_offset = len(e2_anchor_temp)
+            e2_anchor_temp += f"{s_tokens['e2e']}{' ' + e2_arg_str + ' ' if e2_arg_str else ' '}{s_tokens['l4']}."
+        elif anchor_temp_type == 'ss': 
+            e1_anchor_temp = f"{s_tokens['l1']} {s_tokens['mask']} "
+            e1s_anchor_offset = len(e1_anchor_temp)
+            e1_anchor_temp += f"{s_tokens['e1s']} {e1_trigger} "
+            e1e_anchor_offset = len(e1_anchor_temp)
+            e1_anchor_temp += f"{s_tokens['e1e']} {s_tokens['l2']}."
+            e2_anchor_temp = f"{s_tokens['l3']} {s_tokens['mask']} "
+            e2s_anchor_offset = len(e2_anchor_temp)
+            e2_anchor_temp += f"{s_tokens['e2s']} {e2_trigger} "
+            e2e_anchor_offset = len(e2_anchor_temp)
+            e2_anchor_temp += f"{s_tokens['e2e']} {s_tokens['l4']}."
+        else:
+            raise ValueError(f'Unknown prompt type: {prompt_type}')
     else:
         raise ValueError(f'Unknown prompt type: {prompt_type}')
     if inference_temp_type == 'hn': 
@@ -481,14 +524,28 @@ def create_prompt(
             sentences, sentence_lens, 
             special_token_dict, tokenizer, max_length - template_length
         )
-        e1s_offset, e1e_offset, e2s_offset, e2e_offset = context_data['e1s_offset'], context_data['e1e_offset'], context_data['e2s_offset'], context_data['e2e_offset']
+        e1s_offset, e1e_offset = context_data['e1s_core_offset'], context_data['e1e_core_offset']
+        e2s_offset, e2e_offset = context_data['e2s_core_offset'], context_data['e2e_core_offset']
         if context_data['type'] == 'same_sent': # two events in the same sentence
-            prompt = template_data['template'] + context_data['context']
-            e1s_offset, e1e_offset, e2s_offset, e2e_offset = np.asarray([e1s_offset, e1e_offset, e2s_offset, e2e_offset]) + np.full((4,), len(template_data['template']))
+            prompt = template_data['template'] + context_data['before_context'] + context_data['core_context'] + context_data['after_context']
+            e1s_offset, e1e_offset, e2s_offset, e2e_offset = (
+                np.asarray([e1s_offset, e1e_offset, e2s_offset, e2e_offset]) + 
+                np.full((4,), len(template_data['template'] + context_data['before_context']))
+            )
         else: # two events in different sentences
-            prompt = template_data['template'] + context_data['e1_context'] + ' ' + context_data['e2_context']
-            e1s_offset, e1e_offset = np.asarray([e1s_offset, e1e_offset]) + np.full((2,), len(template_data['template']))
-            e2s_offset, e2e_offset = np.asarray([e2s_offset, e2e_offset]) + np.full((2,), len(template_data['template']) + len(context_data['e1_context']) + 1)
+            prompt = (
+                template_data['template'] + 
+                context_data['e1_before_context'] + context_data['e1_core_context'] + context_data['e1_after_context'] + ' ' + 
+                context_data['e2_before_context'] + context_data['e2_core_context'] + context_data['e2_after_context']
+            )
+            e1s_offset, e1e_offset = np.asarray([e1s_offset, e1e_offset]) + np.full((2,), len(template_data['template'] + context_data['e1_core_context']))
+            e2s_offset, e2e_offset = (
+                np.asarray([e2s_offset, e2e_offset]) + 
+                np.full((2,), len(template_data['template']) + len(context_data['e1_before_context']) + 
+                    len(context_data['e1_core_context']) + len(context_data['e1_after_context']) + 
+                    len(context_data['e2_before_context']) + 1
+                )
+            )
         mask_offset = prompt.find(special_token_dict['mask'])
         assert prompt[mask_offset:mask_offset + len(special_token_dict['mask'])] == special_token_dict['mask']
         assert prompt[e1s_offset:e1e_offset] == special_token_dict['e1s'] + ' ' + e1_trigger + ' '
@@ -498,6 +555,8 @@ def create_prompt(
         return {
             'prompt': prompt, 
             'mask_offset': mask_offset, 
+            'type_match_mask_offset': -1, 
+            'arg_match_mask_offset': -1, 
             'e1s_offset': e1s_offset, 
             'e1e_offset': e1e_offset, 
             'e1_type_mask_offset': -1, 
@@ -516,18 +575,32 @@ def create_prompt(
             sentences, sentence_lens, 
             special_token_dict, tokenizer, max_length - template_length
         )
-        e1s_offset, e1e_offset, e2s_offset, e2e_offset = context_data['e1s_offset'], context_data['e1e_offset'], context_data['e2s_offset'], context_data['e2e_offset']
+        e1s_offset, e1e_offset = context_data['e1s_core_offset'], context_data['e1e_core_offset']
+        e2s_offset, e2e_offset = context_data['e2s_core_offset'], context_data['e2e_core_offset']
         if context_data['type'] == 'same_sent': # two events in the same sentence
-            prompt = template_data['template'] + context_data['context']
-            e1s_offset, e1e_offset, e2s_offset, e2e_offset = np.asarray([e1s_offset, e1e_offset, e2s_offset, e2e_offset]) + np.full((4,), len(template_data['template']))
+            prompt = template_data['template'] + context_data['before_context'] + context_data['core_context'] + context_data['after_context']
+            e1s_offset, e1e_offset, e2s_offset, e2e_offset = (
+                np.asarray([e1s_offset, e1e_offset, e2s_offset, e2e_offset]) + 
+                np.full((4,), len(template_data['template'] + context_data['before_context']))
+            )
         else: # two events in different sentences
-            prompt = template_data['template'] + context_data['e1_context'] + ' ' + context_data['e2_context']
-            e1s_offset, e1e_offset = np.asarray([e1s_offset, e1e_offset]) + np.full((2,), len(template_data['template']))
-            e2s_offset, e2e_offset = np.asarray([e2s_offset, e2e_offset]) + np.full((2,), len(template_data['template']) + len(context_data['e1_context']) + 1)
+            prompt = (
+                template_data['template'] + 
+                context_data['e1_before_context'] + context_data['e1_core_context'] + context_data['e1_after_context'] + ' ' + 
+                context_data['e2_before_context'] + context_data['e2_core_context'] + context_data['e2_after_context']
+            )
+            e1s_offset, e1e_offset = np.asarray([e1s_offset, e1e_offset]) + np.full((2,), len(template_data['template'] + context_data['e1_before_context']))
+            e2s_offset, e2e_offset = (
+                np.asarray([e2s_offset, e2e_offset]) + 
+                np.full((2,), len(template_data['template']) + len(context_data['e1_before_context']) + 
+                    len(context_data['e1_core_context']) + len(context_data['e1_after_context']) + 
+                    len(context_data['e2_before_context']) + 1
+                )
+            )
         if prompt_type.startswith('t'):
             mask_offsets = list(findall(special_token_dict['mask'], prompt))
             assert len(mask_offsets) == 3
-            e1_type_mask_offset, e2_type_mask_offset, mask_offset = mask_offsets[0], mask_offsets[1], mask_offsets[2]
+            e1_type_mask_offset, e2_type_mask_offset, mask_offset = mask_offsets
             assert prompt[e1_type_mask_offset:e1_type_mask_offset + len(special_token_dict['mask'])] == special_token_dict['mask']
             assert prompt[e2_type_mask_offset:e2_type_mask_offset + len(special_token_dict['mask'])] == special_token_dict['mask']
         else: 
@@ -540,6 +613,8 @@ def create_prompt(
         return {
             'prompt': prompt, 
             'mask_offset': mask_offset, 
+            'type_match_mask_offset': -1, 
+            'arg_match_mask_offset': -1, 
             'e1s_offset': e1s_offset, 
             'e1e_offset': e1e_offset, 
             'e1_type_mask_offset': e1_type_mask_offset, 
@@ -555,19 +630,8 @@ def create_prompt(
             len(tokenizer.tokenize(template_data['e1_anchor_template'])) + 
             len(tokenizer.tokenize(template_data['e2_anchor_template'])) + 
             len(tokenizer.tokenize(template_data['infer_template'])) + 
-            7
+            6
         )
-        {
-            'prefix_template': prefix_template, 
-            'e1_anchor_template': e1_anchor_temp, 
-            'e2_anchor_template': e2_anchor_temp, 
-            'infer_template': infer_template, 
-            'e1s_anchor_offset': e1s_anchor_offset, 
-            'e1e_anchor_offset': e1e_anchor_offset, 
-            'e2s_anchor_offset': e2s_anchor_offset, 
-            'e2e_anchor_offset': e2e_anchor_offset, 
-            'special_tokens': normal_s_tokens
-        }
         assert set(template_data['special_tokens']).issubset(set(tokenizer.additional_special_tokens))
         context_data = create_event_context(
             e1_sent_idx, e1_sent_start, e1_trigger, 
@@ -578,12 +642,41 @@ def create_prompt(
         e1s_offset, e1e_offset = template_data['e1s_anchor_offset'], template_data['e1e_anchor_offset']
         e2s_offset, e2e_offset = template_data['e2s_anchor_offset'], template_data['e2e_anchor_offset']
         if context_data['type'] == 'same_sent': # two events in the same sentence
-            prompt = template_data['prefix_template'] + context_data['context'] + ' '
+            prompt = template_data['prefix_template'] + context_data['before_context'] + context_data['core_context'] + ' '
             e1s_offset, e1e_offset = np.asarray([e1s_offset, e1e_offset]) + np.full((2,), len(prompt))
             prompt += template_data['e1_anchor_template'] + ' '
             e2s_offset, e2e_offset = np.asarray([e2s_offset, e2e_offset]) + np.full((2,), len(prompt))
-            prompt += template_data['e2_anchor_template'] + ' ' + template_data['infer_template']
+            prompt += template_data['e2_anchor_template'] + context_data['after_context'] + ' ' + template_data['infer_template']
         else: # two events in different sentences
-            prompt = template_data['template'] + context_data['e1_context'] + ' ' + context_data['e2_context']
-            e1s_offset, e1e_offset = np.asarray([e1s_offset, e1e_offset]) + np.full((2,), len(template_data['template']))
-            e2s_offset, e2e_offset = np.asarray([e2s_offset, e2e_offset]) + np.full((2,), len(template_data['template']) + len(context_data['e1_context']) + 1)
+            prompt = template_data['prefix_template'] + context_data['e1_before_context'] + context_data['e1_core_context'] + ' '
+            e1s_offset, e1e_offset = np.asarray([e1s_offset, e1e_offset]) + np.full((2,), len(prompt))
+            prompt += (
+                template_data['e1_anchor_template'] + context_data['e1_after_context'] + ' ' + 
+                context_data['e2_before_context'] + context_data['e2_core_context'] + ' '
+            )
+            e2s_offset, e2e_offset = np.asarray([e2s_offset, e2e_offset]) + np.full((2,), len(prompt))
+            prompt += template_data['e2_anchor_template'] + context_data['e2_after_context'] + ' ' + template_data['infer_template']
+        mask_offsets = list(findall(special_token_dict['mask'], prompt))
+        assert len(mask_offsets) == 5
+        e1_type_mask_offset, e2_type_mask_offset, type_match_mask_offset, arg_match_mask_offset, mask_offset = mask_offsets
+        assert prompt[e1_type_mask_offset:e1_type_mask_offset + len(special_token_dict['mask'])] == special_token_dict['mask']
+        assert prompt[e2_type_mask_offset:e2_type_mask_offset + len(special_token_dict['mask'])] == special_token_dict['mask']
+        assert prompt[type_match_mask_offset:type_match_mask_offset + len(special_token_dict['mask'])] == special_token_dict['mask']
+        assert prompt[arg_match_mask_offset:arg_match_mask_offset + len(special_token_dict['mask'])] == special_token_dict['mask']
+        assert prompt[mask_offset:mask_offset + len(special_token_dict['mask'])] == special_token_dict['mask']
+        assert prompt[e1s_offset:e1e_offset] == special_token_dict['e1s'] + ' ' + e1_trigger + ' '
+        assert prompt[e1e_offset:e1e_offset + len(special_token_dict['e1e'])] == special_token_dict['e1e']
+        assert prompt[e2s_offset:e2e_offset] == special_token_dict['e2s'] + ' ' + e2_trigger + ' '
+        assert prompt[e2e_offset:e2e_offset + len(special_token_dict['e2e'])] == special_token_dict['e2e']
+        return {
+            'prompt': prompt, 
+            'mask_offset': mask_offset, 
+            'type_match_mask_offset': type_match_mask_offset, 
+            'arg_match_mask_offset': arg_match_mask_offset, 
+            'e1s_offset': e1s_offset, 
+            'e1e_offset': e1e_offset, 
+            'e1_type_mask_offset': e1_type_mask_offset, 
+            'e2s_offset': e2s_offset, 
+            'e2e_offset': e2e_offset, 
+            'e2_type_mask_offset': e2_type_mask_offset, 
+        }
