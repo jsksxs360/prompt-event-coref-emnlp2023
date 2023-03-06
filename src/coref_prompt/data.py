@@ -1,4 +1,4 @@
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, DataLoader
 import json
 from tqdm.auto import tqdm
 from collections import defaultdict
@@ -306,13 +306,16 @@ def get_dataLoader(args, dataset, tokenizer, collote_fn_type:str, verbalizer:dic
                 encoding.char_to_token(sample['e1_type_mask_offset']), 
                 encoding.char_to_token(sample['e2_type_mask_offset'])
             )
+            assert None not in [
+                mask_idx, e1s_idx, e1e_idx, e2s_idx, e2e_idx, e1_type_mask_idx, e2_type_mask_idx
+            ]
             batch_mask_idx.append(mask_idx)
             batch_event_idx.append([e1s_idx, e1e_idx, e2s_idx, e2e_idx])
             batch_e1_type_mask_idx.append(e1_type_mask_idx)
             batch_e2_type_mask_idx.append(e2_type_mask_idx)
+            batch_coref.append(sample['label'])
             batch_e1_type.append(sample['e1_subtype_id'])
             batch_e2_type.append(sample['e2_subtype_id'])
-            batch_coref.append(sample['label'])
         batch_inputs = tokenizer(
             batch_sen, 
             max_length=args.max_seq_length, 
@@ -336,15 +339,16 @@ def get_dataLoader(args, dataset, tokenizer, collote_fn_type:str, verbalizer:dic
 
     def collote_fn_with_subtype_and_match(batch_samples):
         batch_sen, batch_mask_idx, batch_event_idx, batch_coref = [], [], [], []
-        batch_type_match_mask_idx, batch_arg_match_mask_idx = [], []
+        batch_type_match_mask_idx, batch_arg_match_mask_idx, batch_type_match, batch_arg_match = [], [], [], []
         batch_e1_type_mask_idx, batch_e2_type_mask_idx, batch_e1_type, batch_e2_type = [], [], [], []
         for sample in batch_samples:
             batch_sen.append(sample['prompt'])
             # convert char offsets to token idxs
             encoding = tokenizer(sample['prompt'])
-            mask_idx, batch_type_match_mask_idx, batch_arg_match_mask_idx = (
+            mask_idx, type_match_mask_idx, arg_match_mask_idx = (
                 encoding.char_to_token(sample['mask_offset']), 
-                
+                encoding.char_to_token(sample['type_match_mask_offset']), 
+                encoding.char_to_token(sample['arg_match_mask_offset']), 
             )
             e1s_idx, e1e_idx, e2s_idx, e2e_idx = (
                 encoding.char_to_token(sample['e1s_offset']), 
@@ -356,13 +360,21 @@ def get_dataLoader(args, dataset, tokenizer, collote_fn_type:str, verbalizer:dic
                 encoding.char_to_token(sample['e1_type_mask_offset']), 
                 encoding.char_to_token(sample['e2_type_mask_offset'])
             )
+            assert None not in [
+                mask_idx, type_match_mask_idx, arg_match_mask_idx, 
+                e1s_idx, e1e_idx, e2s_idx, e2e_idx, e1_type_mask_idx, e2_type_mask_idx
+            ]
             batch_mask_idx.append(mask_idx)
+            batch_type_match_mask_idx.append(type_match_mask_idx)
+            batch_arg_match_mask_idx.append(arg_match_mask_idx)
             batch_event_idx.append([e1s_idx, e1e_idx, e2s_idx, e2e_idx])
             batch_e1_type_mask_idx.append(e1_type_mask_idx)
             batch_e2_type_mask_idx.append(e2_type_mask_idx)
+            batch_coref.append(sample['label'])
+            batch_type_match.append(int(sample['e1_subtype_id'] == sample['e2_subtype_id']))
+            batch_arg_match.append(sample['label'])
             batch_e1_type.append(sample['e1_subtype_id'])
             batch_e2_type.append(sample['e2_subtype_id'])
-            batch_coref.append(sample['label'])
         batch_inputs = tokenizer(
             batch_sen, 
             max_length=args.max_seq_length, 
@@ -372,19 +384,37 @@ def get_dataLoader(args, dataset, tokenizer, collote_fn_type:str, verbalizer:dic
         )
         batch_subtype1 = [event_type_ids[t] for t in batch_e1_type]
         batch_subtype2 = [event_type_ids[t] for t in batch_e2_type]
+        batch_type_match = [match_id if match == 1 else mismatch_id for match in batch_type_match]
+        batch_arg_match = [match_id if match == 1 else mismatch_id for match in batch_arg_match]
         batch_label = [pos_id if coref == 1 else neg_id  for coref in batch_coref]
         return {
             'batch_inputs': batch_inputs, 
             'batch_mask_idx': batch_mask_idx, 
+            'batch_type_match_mask_idx': batch_type_match_mask_idx, 
+            'batch_arg_match_mask_idx': batch_arg_match_mask_idx, 
             'batch_event_idx': batch_event_idx, 
             'batch_t1_mask_idx': batch_e1_type_mask_idx, 
             'batch_t2_mask_idx': batch_e2_type_mask_idx, 
+            'type_match': batch_type_match, 
+            'arg_match': batch_arg_match, 
             'subtype1': batch_subtype1, 
             'subtype2': batch_subtype2, 
             'labels': batch_label
         }
 
-
+    if collote_fn_type == 'base_prompt':
+        select_collote_fn = collote_fn
+    elif collote_fn_type == 'knowledge_prompt':
+        select_collote_fn = collote_fn_with_subtype
+    elif collote_fn_type == 'mix_prompt':
+        select_collote_fn = collote_fn_with_subtype_and_match
+    
+    return DataLoader(
+        dataset, 
+        batch_size=(batch_size if batch_size else args.batch_size), 
+        shuffle=shuffle, 
+        collate_fn=select_collote_fn
+    )
 
 if __name__ == '__main__':
 
@@ -413,16 +443,56 @@ if __name__ == '__main__':
     args.model_checkpoint = '../../PT_MODELS/allenai/longformer-large-4096'
 
     tokenizer = AutoTokenizer.from_pretrained(args.model_checkpoint)
-    special_tokens_dict = {'additional_special_tokens': ['<e1_start>', '<e1_end>', '<e2_start>', '<e2_end>', '<l1>', '<l2>', '<l3>', '<l4>', '<l5>', '<l6>']}
+    base_sp_tokens = ['<e1_start>', '<e1_end>', '<e2_start>', '<e2_end>', '<l1>', '<l2>', '<l3>', '<l4>', '<l5>', '<l6>']
+    match_sp_tokens = ['<match>', '<mismatch>']
+    type_sp_tokens = [f'<st_{t_id}>' for t_id in range(len(EVENT_SUBTYPES) + 1)]
+    special_tokens_dict = {
+        'additional_special_tokens': base_sp_tokens + match_sp_tokens + type_sp_tokens
+    }
     tokenizer.add_special_tokens(special_tokens_dict)
 
-    train_data = KBPCoref(
-        '../../data/train_filtered.json', '../../data/EventExtraction/omni_train_pred_args.json', 
-        prompt_type='hn', model_type='longformer', tokenizer=tokenizer, max_length=512
+    # train_data = KBPCoref(
+    #     '../../data/train_filtered.json', '../../data/EventExtraction/omni_train_pred_args.json', 
+    #     prompt_type='hn', model_type='longformer', tokenizer=tokenizer, max_length=512
+    # )
+    # print_data_statistic('../../data/train_filtered.json')
+    # print(len(train_data))
+    # labels = [train_data[s_idx]['label'] for s_idx in range(len(train_data))]
+    # print('Coref:', labels.count(1), 'non-Coref:', labels.count(0))
+    # for i in range(5):
+    #     print(train_data[i])
+
+    train_small_data = KBPCorefTiny(
+        '../../data/train_filtered.json', '../../data/train_filtered_with_cos.json', '../../data/EventExtraction/omni_train_pred_args.json', 
+        neg_top_k=3, prompt_type='m_hta_hn', model_type='longformer', tokenizer=tokenizer, max_length=512
     )
-    print_data_statistic('../../data/train_filtered.json')
-    print(len(train_data))
-    labels = [train_data[s_idx]['label'] for s_idx in range(len(train_data))]
+    print_data_statistic('../../data/train_filtered_with_cos.json')
+    print(len(train_small_data))
+    labels = [train_small_data[s_idx]['label'] for s_idx in range(len(train_small_data))]
     print('Coref:', labels.count(1), 'non-Coref:', labels.count(0))
-    for i in range(5):
-        print(train_data[i])
+    # for i in range(5):
+    #     print(train_small_data[i])
+    
+    verbalizer = {
+        'coref': {'token': 'same', 'id': tokenizer.convert_tokens_to_ids('same')}, 
+        'non-coref': {'token': 'different', 'id': tokenizer.convert_tokens_to_ids('different')}, 
+        'match': {'token': '<match>', 'id': tokenizer.convert_tokens_to_ids('<match>')}, 
+        'mismatch': {'token': '<mismatch>', 'id': tokenizer.convert_tokens_to_ids('<mismatch>')}
+    }
+    for subtype, s_id in subtype2id.items():
+        verbalizer[subtype] = {'token': f'<st_{s_id}>', 'id': tokenizer.convert_tokens_to_ids(f'<st_{s_id}>')}
+    # print(verbalizer)
+    # normal
+    print('=' * 20, 'base_prompt')
+    train_dataloader = get_dataLoader(args, train_small_data, tokenizer, collote_fn_type='base_prompt', verbalizer=verbalizer, shuffle=True)
+    batch_data = next(iter(train_dataloader))
+    batch_X, batch_y = batch_data['batch_inputs'], batch_data['labels']
+    print('batch_X shape:', {k: v.shape for k, v in batch_X.items()})
+    print('batch_y shape:', len(batch_y))
+    print(batch_X)
+    print(batch_y)
+    print(tokenizer.decode(batch_X['input_ids'][0]))
+    print('Testing dataloader...')
+    batch_datas = iter(train_dataloader)
+    for step in tqdm(range(len(train_dataloader))):
+        next(batch_datas)
