@@ -386,7 +386,7 @@ def create_multi_template(e1_trigger:str, e2_trigger:str, e1_arg_str: str, e2_ar
         f"{s_tokens['e2s']} {e2_trigger} {s_tokens['e2e']}, and it needs to judge whether they refer to the same or different events: "
     )
     if anchor_temp_type.startswith('h'): # hard template
-        if anchor_temp_type == 'hsa': 
+        if anchor_temp_type == 'hta': 
             e1_anchor_temp = "Here "
             e1s_anchor_offset = len(e1_anchor_temp)
             e1_anchor_temp += f"{s_tokens['e1s']} {e1_trigger} "
@@ -397,7 +397,7 @@ def create_multi_template(e1_trigger:str, e2_trigger:str, e1_arg_str: str, e2_ar
             e2_anchor_temp += f"{s_tokens['e2s']} {e2_trigger} "
             e2e_anchor_offset = len(e2_anchor_temp)
             e2_anchor_temp += f"{s_tokens['e2e']} expresses a {s_tokens['mask']} event{' ' + e2_arg_str if e2_arg_str else ''}."
-        elif anchor_temp_type == 'hs': 
+        elif anchor_temp_type == 'ht': 
             e1_anchor_temp = "Here "
             e1s_anchor_offset = len(e1_anchor_temp)
             e1_anchor_temp += f"{s_tokens['e1s']} {e1_trigger} "
@@ -411,7 +411,7 @@ def create_multi_template(e1_trigger:str, e2_trigger:str, e1_arg_str: str, e2_ar
         else:
             raise ValueError(f'Unknown prompt type: {prompt_type}')
     elif anchor_temp_type.startswith('s'): # soft template
-        if anchor_temp_type == 'ssa': 
+        if anchor_temp_type == 'sta': 
             e1_anchor_temp = f"{s_tokens['l1']} {s_tokens['mask']} "
             e1s_anchor_offset = len(e1_anchor_temp)
             e1_anchor_temp += f"{s_tokens['e1s']} {e1_trigger} "
@@ -422,7 +422,7 @@ def create_multi_template(e1_trigger:str, e2_trigger:str, e1_arg_str: str, e2_ar
             e2_anchor_temp += f"{s_tokens['e2s']} {e2_trigger} "
             e2e_anchor_offset = len(e2_anchor_temp)
             e2_anchor_temp += f"{s_tokens['e2e']}{' ' + e2_arg_str + ' ' if e2_arg_str else ' '}{s_tokens['l4']}."
-        elif anchor_temp_type == 'ss': 
+        elif anchor_temp_type == 'st': 
             e1_anchor_temp = f"{s_tokens['l1']} {s_tokens['mask']} "
             e1s_anchor_offset = len(e1_anchor_temp)
             e1_anchor_temp += f"{s_tokens['e1s']} {e1_trigger} "

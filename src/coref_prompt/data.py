@@ -1,6 +1,7 @@
 from torch.utils.data import Dataset
 import json
 from tqdm.auto import tqdm
+from collections import defaultdict
 from utils import create_prompt
 
 PROMPT_TYPE = [
@@ -8,8 +9,8 @@ PROMPT_TYPE = [
     'sn', 'sm', 'sq', # (hard/soft normal/middle/question)
     't_hn', 'ta_hn', 't_hm', 'ta_hm', 't_hq', 'ta_hq', # knowledge enhanced prompts 
     't_sn', 'ta_sn', 't_sm', 'ta_sm', 't_sq', 'ta_sq', # (subtype/subtype-argument)
-    'm_hs_hn', 'm_hs_hm', 'm_hs_hq', 'm_hsa_hn', 'm_hsa_hm', 'm_hsa_hq', # mix prompts
-    'm_ss_hn', 'm_ss_hm', 'm_ss_hq', 'm_ssa_hn', 'm_ssa_hm', 'm_ssa_hq'  # (hard/soft subtype/argument/subtype-argument)
+    'm_ht_hn', 'm_ht_hm', 'm_ht_hq', 'm_hta_hn', 'm_hta_hm', 'm_hta_hq', # mix prompts
+    'm_st_hn', 'm_st_hm', 'm_st_hq', 'm_sta_hn', 'm_sta_hm', 'm_sta_hq'  # (hard/soft subtype/argument/subtype-argument)
 ]
 
 EVENT_SUBTYPES = [ # 18 subtypes
@@ -18,6 +19,7 @@ EVENT_SUBTYPES = [ # 18 subtypes
     'endposition', 'correspondence', 'arrestjail', 'startposition', 'transportperson', 'die'
 ]
 id2subtype = {idx: c for idx, c in enumerate(EVENT_SUBTYPES, start=1)}
+id2subtype[0] = 'other'
 subtype2id = {v: k for k, v in id2subtype.items()}
 
 def get_pred_arguments(arg_file:str) -> dict:
@@ -112,6 +114,277 @@ class KBPCoref(Dataset):
 
     def __getitem__(self, idx):
         return self.data[idx]
+
+def create_event_simi_dict(event_pairs_id, event_pairs_cos, clusters):
+    simi_dict = defaultdict(list)
+    for id_pair, cos in zip(event_pairs_id, event_pairs_cos):
+        e1_id, e2_id = id_pair.split('###')
+        coref = 1 if get_event_cluster_id(e1_id, clusters) == get_event_cluster_id(e2_id, clusters) else 0
+        simi_dict[e1_id].append({'id': e2_id, 'cos': cos, 'coref': coref})
+        simi_dict[e2_id].append({'id': e1_id, 'cos': cos, 'coref': coref})
+    for simi_list in simi_dict.values():
+        simi_list.sort(key=lambda x:x['cos'], reverse=True)
+    return simi_dict
+
+def get_noncoref_ids(simi_list, top_k):
+    noncoref_ids = []
+    for simi in simi_list:
+        if simi['coref'] == 0:
+            noncoref_ids.append(simi['id'])
+            if len(noncoref_ids) >= top_k:
+                break
+    return noncoref_ids
+
+class KBPCorefTiny(Dataset):
+    def __init__(self, data_file:str, data_file_with_cos:str, arg_file:str, neg_top_k:int, prompt_type:str, model_type:str, tokenizer, max_length:int):
+        '''
+        - data_file: source train data file
+        - data_file_with_cos: train data file with event similarities
+        '''
+        assert prompt_type in PROMPT_TYPE and model_type in ['bert', 'roberta', 'longformer']
+        assert neg_top_k > 0
+        self.model_type = model_type
+        self.tokenizer = tokenizer
+        self.max_length = max_length
+        self.arg_dict = get_pred_arguments(arg_file)
+        self.data = self.load_data(data_file, data_file_with_cos, neg_top_k, prompt_type)
+    
+    def load_data(self, data_file, data_file_with_cos, neg_top_k, prompt_type:str):
+        Data = []
+        with open(data_file, 'rt', encoding='utf-8') as f, open(data_file_with_cos, 'rt', encoding='utf-8') as f_cos:
+            # positive samples (coref pairs)
+            for line in tqdm(f.readlines()): 
+                sample = json.loads(line.strip())
+                clusters = sample['clusters']
+                sentences = sample['sentences']
+                sentences_lengths = [len(self.tokenizer.tokenize(sent['text'])) for sent in sentences]
+                events = sample['events']
+                for i in range(len(events) - 1):
+                    for j in range(i + 1, len(events)):
+                        event_1, event_2 = events[i], events[j]
+                        event_1_cluster_id = get_event_cluster_id(event_1['event_id'], clusters)
+                        event_2_cluster_id = get_event_cluster_id(event_2['event_id'], clusters)
+                        event_1_args = self.arg_dict[sample['doc_id']][event_1['start']]
+                        event_2_args = self.arg_dict[sample['doc_id']][event_2['start']]
+                        if event_1_cluster_id == event_2_cluster_id:
+                            prompt_data = create_prompt(
+                                event_1['sent_idx'], event_1['sent_start'], event_1['trigger'], event_1_args, 
+                                event_2['sent_idx'], event_2['sent_start'], event_2['trigger'], event_2_args, 
+                                sentences, sentences_lengths, 
+                                prompt_type, self.model_type, self.tokenizer, self.max_length
+                            )
+                            Data.append({
+                                'id': sample['doc_id'], 
+                                'prompt': prompt_data['prompt'], 
+                                'mask_offset': prompt_data['mask_offset'], 
+                                'type_match_mask_offset': prompt_data['type_match_mask_offset'], 
+                                'arg_match_mask_offset': prompt_data['arg_match_mask_offset'], 
+                                'e1_id': event_1['start'], # event1
+                                'e1_trigger': event_1['trigger'], 
+                                'e1_subtype': event_1['subtype'] if event_1['subtype'] in EVENT_SUBTYPES else 'normal', 
+                                'e1_subtype_id': subtype2id.get(event_1['subtype'], 0), # 0 - 'other'
+                                'e1s_offset': prompt_data['e1s_offset'], 
+                                'e1e_offset': prompt_data['e1e_offset'], 
+                                'e1_type_mask_offset': prompt_data['e1_type_mask_offset'], 
+                                'e2_id': event_2['start'], # event2
+                                'e2_trigger': event_2['trigger'], 
+                                'e2_subtype': event_2['subtype'] if event_2['subtype'] in EVENT_SUBTYPES else 'normal', 
+                                'e2_subtype_id': subtype2id.get(event_2['subtype'], 0), # 0 - 'other'
+                                'e2s_offset': prompt_data['e2s_offset'], 
+                                'e2e_offset': prompt_data['e2e_offset'], 
+                                'e2_type_mask_offset': prompt_data['e2_type_mask_offset'], 
+                                'label': 1
+                            })
+            # negtive samples (non-coref pairs)
+            for line in tqdm(f_cos.readlines()):
+                sample = json.loads(line.strip())
+                clusters = sample['clusters']
+                sentences = sample['sentences']
+                sentences_lengths = [len(self.tokenizer.tokenize(sent['text'])) for sent in sentences]
+                event_simi_dict = create_event_simi_dict(sample['event_pairs_id'], sample['event_pairs_cos'], clusters)
+                events_list, events_dict = sample['events'], {e['event_id']:e for e in sample['events']}
+                for i in range(len(events_list)):
+                    event_1 = events_list[i]
+                    noncoref_event_ids = get_noncoref_ids(event_simi_dict[event_1['event_id']], top_k=neg_top_k)
+                    for e_id in noncoref_event_ids: # non-coref
+                        event_2 = events_dict[e_id]
+                        if event_1['start'] < event_2['start']:
+                            event_1_args = self.arg_dict[sample['doc_id']][event_1['start']]
+                            event_2_args = self.arg_dict[sample['doc_id']][event_2['start']]
+                            prompt_data = create_prompt(
+                                event_1['sent_idx'], event_1['sent_start'], event_1['trigger'], event_1_args, 
+                                event_2['sent_idx'], event_2['sent_start'], event_2['trigger'], event_2_args, 
+                                sentences, sentences_lengths, 
+                                prompt_type, self.model_type, self.tokenizer, self.max_length
+                            )
+                            Data.append({
+                                'id': sample['doc_id'], 
+                                'prompt': prompt_data['prompt'], 
+                                'mask_offset': prompt_data['mask_offset'], 
+                                'type_match_mask_offset': prompt_data['type_match_mask_offset'], 
+                                'arg_match_mask_offset': prompt_data['arg_match_mask_offset'], 
+                                'e1_id': event_1['start'], # event1
+                                'e1_trigger': event_1['trigger'], 
+                                'e1_subtype': event_1['subtype'] if event_1['subtype'] in EVENT_SUBTYPES else 'normal', 
+                                'e1_subtype_id': subtype2id.get(event_1['subtype'], 0), # 0 - 'other'
+                                'e1s_offset': prompt_data['e1s_offset'], 
+                                'e1e_offset': prompt_data['e1e_offset'], 
+                                'e1_type_mask_offset': prompt_data['e1_type_mask_offset'], 
+                                'e2_id': event_2['start'], # event2
+                                'e2_trigger': event_2['trigger'], 
+                                'e2_subtype': event_2['subtype'] if event_2['subtype'] in EVENT_SUBTYPES else 'normal', 
+                                'e2_subtype_id': subtype2id.get(event_2['subtype'], 0), # 0 - 'other'
+                                'e2s_offset': prompt_data['e2s_offset'], 
+                                'e2e_offset': prompt_data['e2e_offset'], 
+                                'e2_type_mask_offset': prompt_data['e2_type_mask_offset'], 
+                                'label': 0
+                            })
+        return Data
+    
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        return self.data[idx]
+
+def get_dataLoader(args, dataset, tokenizer, collote_fn_type:str, verbalizer:dict, batch_size:int=None, shuffle:bool=False):
+    assert collote_fn_type in ['base_prompt', 'knowledge_prompt', 'mix_prompt']
+    pos_id, neg_id = verbalizer['coref']['id'], verbalizer['non-coref']['id']
+    match_id, mismatch_id = verbalizer['match']['id'], verbalizer['mismatch']['id']
+    event_type_ids = {
+        subtype_id: verbalizer[id2subtype[subtype_id]]['id']
+        for subtype_id in range(len(EVENT_SUBTYPES) + 1)
+    }
+
+    def collote_fn(batch_samples):
+        batch_sen, batch_mask_idx, batch_event_idx, batch_coref = [], [], [], []
+        for sample in batch_samples:
+            batch_sen.append(sample['prompt'])
+            # convert char offsets to token idxs
+            encoding = tokenizer(sample['prompt'])
+            mask_idx = encoding.char_to_token(sample['mask_offset'])
+            e1s_idx, e1e_idx, e2s_idx, e2e_idx = (
+                encoding.char_to_token(sample['e1s_offset']), 
+                encoding.char_to_token(sample['e1e_offset']), 
+                encoding.char_to_token(sample['e2s_offset']), 
+                encoding.char_to_token(sample['e2e_offset'])
+            )
+            assert None not in [mask_idx, e1s_idx, e1e_idx, e2s_idx, e2e_idx]
+            batch_mask_idx.append(mask_idx)
+            batch_event_idx.append([e1s_idx, e1e_idx, e2s_idx, e2e_idx])
+            batch_coref.append(sample['label'])
+        batch_inputs = tokenizer(
+            batch_sen, 
+            max_length=args.max_seq_length, 
+            padding=True, 
+            truncation=True, 
+            return_tensors="pt"
+        )
+        batch_labels = [pos_id if coref == 1 else neg_id for coref in batch_coref]
+        return {
+            'batch_inputs': batch_inputs, 
+            'batch_mask_idx': batch_mask_idx, 
+            'batch_event_idx': batch_event_idx, 
+            'labels': batch_labels
+        }
+    
+    def collote_fn_with_subtype(batch_samples):
+        batch_sen, batch_mask_idx, batch_event_idx, batch_coref = [], [], [], []
+        batch_e1_type_mask_idx, batch_e2_type_mask_idx, batch_e1_type, batch_e2_type = [], [], [], []
+        for sample in batch_samples:
+            batch_sen.append(sample['prompt'])
+            # convert char offsets to token idxs
+            encoding = tokenizer(sample['prompt'])
+            mask_idx = encoding.char_to_token(sample['mask_offset'])
+            e1s_idx, e1e_idx, e2s_idx, e2e_idx = (
+                encoding.char_to_token(sample['e1s_offset']), 
+                encoding.char_to_token(sample['e1e_offset']), 
+                encoding.char_to_token(sample['e2s_offset']), 
+                encoding.char_to_token(sample['e2e_offset'])
+            )
+            e1_type_mask_idx, e2_type_mask_idx = (
+                encoding.char_to_token(sample['e1_type_mask_offset']), 
+                encoding.char_to_token(sample['e2_type_mask_offset'])
+            )
+            batch_mask_idx.append(mask_idx)
+            batch_event_idx.append([e1s_idx, e1e_idx, e2s_idx, e2e_idx])
+            batch_e1_type_mask_idx.append(e1_type_mask_idx)
+            batch_e2_type_mask_idx.append(e2_type_mask_idx)
+            batch_e1_type.append(sample['e1_subtype_id'])
+            batch_e2_type.append(sample['e2_subtype_id'])
+            batch_coref.append(sample['label'])
+        batch_inputs = tokenizer(
+            batch_sen, 
+            max_length=args.max_seq_length, 
+            padding=True, 
+            truncation=True, 
+            return_tensors="pt"
+        )
+        batch_subtype1 = [event_type_ids[t] for t in batch_e1_type]
+        batch_subtype2 = [event_type_ids[t] for t in batch_e2_type]
+        batch_label = [pos_id if coref == 1 else neg_id  for coref in batch_coref]
+        return {
+            'batch_inputs': batch_inputs, 
+            'batch_mask_idx': batch_mask_idx, 
+            'batch_event_idx': batch_event_idx, 
+            'batch_t1_mask_idx': batch_e1_type_mask_idx, 
+            'batch_t2_mask_idx': batch_e2_type_mask_idx, 
+            'subtype1': batch_subtype1, 
+            'subtype2': batch_subtype2, 
+            'labels': batch_label
+        }
+
+    def collote_fn_with_subtype_and_match(batch_samples):
+        batch_sen, batch_mask_idx, batch_event_idx, batch_coref = [], [], [], []
+        batch_type_match_mask_idx, batch_arg_match_mask_idx = [], []
+        batch_e1_type_mask_idx, batch_e2_type_mask_idx, batch_e1_type, batch_e2_type = [], [], [], []
+        for sample in batch_samples:
+            batch_sen.append(sample['prompt'])
+            # convert char offsets to token idxs
+            encoding = tokenizer(sample['prompt'])
+            mask_idx, batch_type_match_mask_idx, batch_arg_match_mask_idx = (
+                encoding.char_to_token(sample['mask_offset']), 
+                
+            )
+            e1s_idx, e1e_idx, e2s_idx, e2e_idx = (
+                encoding.char_to_token(sample['e1s_offset']), 
+                encoding.char_to_token(sample['e1e_offset']), 
+                encoding.char_to_token(sample['e2s_offset']), 
+                encoding.char_to_token(sample['e2e_offset'])
+            )
+            e1_type_mask_idx, e2_type_mask_idx = (
+                encoding.char_to_token(sample['e1_type_mask_offset']), 
+                encoding.char_to_token(sample['e2_type_mask_offset'])
+            )
+            batch_mask_idx.append(mask_idx)
+            batch_event_idx.append([e1s_idx, e1e_idx, e2s_idx, e2e_idx])
+            batch_e1_type_mask_idx.append(e1_type_mask_idx)
+            batch_e2_type_mask_idx.append(e2_type_mask_idx)
+            batch_e1_type.append(sample['e1_subtype_id'])
+            batch_e2_type.append(sample['e2_subtype_id'])
+            batch_coref.append(sample['label'])
+        batch_inputs = tokenizer(
+            batch_sen, 
+            max_length=args.max_seq_length, 
+            padding=True, 
+            truncation=True, 
+            return_tensors="pt"
+        )
+        batch_subtype1 = [event_type_ids[t] for t in batch_e1_type]
+        batch_subtype2 = [event_type_ids[t] for t in batch_e2_type]
+        batch_label = [pos_id if coref == 1 else neg_id  for coref in batch_coref]
+        return {
+            'batch_inputs': batch_inputs, 
+            'batch_mask_idx': batch_mask_idx, 
+            'batch_event_idx': batch_event_idx, 
+            'batch_t1_mask_idx': batch_e1_type_mask_idx, 
+            'batch_t2_mask_idx': batch_e2_type_mask_idx, 
+            'subtype1': batch_subtype1, 
+            'subtype2': batch_subtype2, 
+            'labels': batch_label
+        }
+
+
 
 if __name__ == '__main__':
 
