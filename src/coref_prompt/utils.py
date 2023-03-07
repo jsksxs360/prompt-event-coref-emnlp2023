@@ -1,5 +1,23 @@
 import numpy as np
 
+PROMPT_TYPE = [
+    'hn', 'hm', 'hq', # base prompts 
+    'sn', 'sm', 'sq', # (hard/soft normal/middle/question)
+    't_hn', 'ta_hn', 't_hm', 'ta_hm', 't_hq', 'ta_hq', # knowledge enhanced prompts 
+    't_sn', 'ta_sn', 't_sm', 'ta_sm', 't_sq', 'ta_sq', # (subtype/subtype-argument)
+    'm_ht_hn', 'm_ht_hm', 'm_ht_hq', 'm_hta_hn', 'm_hta_hm', 'm_hta_hq', # mix prompts
+    'm_st_hn', 'm_st_hm', 'm_st_hq', 'm_sta_hn', 'm_sta_hm', 'm_sta_hq'  # (hard/soft subtype/argument/subtype-argument)
+]
+
+EVENT_SUBTYPES = [ # 18 subtypes
+    'artifact', 'transferownership', 'transaction', 'broadcast', 'contact', 'demonstrate', \
+    'injure', 'transfermoney', 'transportartifact', 'attack', 'meet', 'elect', \
+    'endposition', 'correspondence', 'arrestjail', 'startposition', 'transportperson', 'die'
+]
+id2subtype = {idx: c for idx, c in enumerate(EVENT_SUBTYPES, start=1)}
+id2subtype[0] = 'other'
+subtype2id = {v: k for k, v in id2subtype.items()}
+
 def create_event_context(
     e1_sent_idx:int, e1_sent_start:int, e1_trigger:str,  
     e2_sent_idx:int, e2_sent_start:int, e2_trigger:str,  
@@ -323,57 +341,13 @@ def create_knowledge_template(e1_trigger:str, e2_trigger:str, e1_arg_str: str, e
                 raise ValueError(f'Unknown prompt type: {prompt_type}')
         else:
             raise ValueError(f'Unknown prompt type: {prompt_type}')
-    elif prompt_type.startswith('a'): # argument template
-        if prompt_type.startswith('a_h'): # hard template
-            if prompt_type == 'a_hn':
-                template = (
-                    f"In the following text, the event expressed by {s_tokens['e1s']} {e1_trigger} {s_tokens['e1e']}{' ' + e1_arg_str + ' ' if e1_arg_str else ' '}"
-                    f"and the event expressed by {s_tokens['e2s']} {e2_trigger} {s_tokens['e2e']}{' ' + e2_arg_str + ' ' if e2_arg_str else ' '}refer to {s_tokens['mask']} event: "
-                )
-            elif prompt_type == 'a_hm':
-                template = (
-                    f"In the following text, the event expressed by {s_tokens['e1s']} {e1_trigger} {s_tokens['e1e']}{' ' + e1_arg_str + ' ' if e1_arg_str else ' '}"
-                    f"{s_tokens['mask']} the event expressed by {s_tokens['e2s']} {e2_trigger} {s_tokens['e2e']}{' ' + e2_arg_str if e2_arg_str else ''}: "
-                )
-            elif prompt_type == 'a_hq':
-                template = (
-                    f"In the following text, do the event expressed by {s_tokens['e1s']} {e1_trigger} {s_tokens['e1e']}{' ' + e1_arg_str + ' ' if e1_arg_str else ' '}"
-                    f"and the event expressed by {s_tokens['e2s']} {e2_trigger} {s_tokens['e2e']}{' ' + e2_arg_str + ' ' if e2_arg_str else ' '}"
-                    f"refer to the same event? {s_tokens['mask']}. "
-                )
-            else:
-                raise ValueError(f'Unknown prompt type: {prompt_type}')
-        elif prompt_type.startswith('a_s'): # soft template
-            if prompt_type == 'a_sn':
-                template = (
-                    f"In the following text, "
-                    f"{s_tokens['l1']} {s_tokens['e1s']} {e1_trigger} {s_tokens['e1e']}{' ' + e1_arg_str + ' ' if e1_arg_str else ' '}{s_tokens['l2']} "
-                    f"{s_tokens['l3']} {s_tokens['e2s']} {e2_trigger} {s_tokens['e2e']}{' ' + e2_arg_str + ' ' if e2_arg_str else ' '}{s_tokens['l4']} "
-                    f"{s_tokens['l5']} {s_tokens['mask']} {s_tokens['l6']}: "
-                )
-            elif prompt_type == 'a_sm':
-                template = (
-                    f"In the following text, "
-                    f"{s_tokens['l1']} {s_tokens['e1s']} {e1_trigger} {s_tokens['e1e']}{' ' + e1_arg_str + ' ' if e1_arg_str else ' '}{s_tokens['l2']} "
-                    f"{s_tokens['l5']} {s_tokens['mask']} {s_tokens['l6']} "
-                    f"{s_tokens['l3']} {s_tokens['e2s']} {e2_trigger} {s_tokens['e2e']}{' ' + e2_arg_str + ' ' if e2_arg_str else ' '}{s_tokens['l4']}: "
-                )
-            elif prompt_type == 'a_sq':
-                template = (
-                    f"In the following text, "
-                    f"{s_tokens['l1']} {s_tokens['e1s']} {e1_trigger} {s_tokens['e1e']}{' ' + e1_arg_str + ' ' if e1_arg_str else ' '}{s_tokens['l2']} "
-                    f"{s_tokens['l3']} {s_tokens['e2s']} {e2_trigger} {s_tokens['e2e']}{' ' + e2_arg_str + ' ' if e2_arg_str else ' '}{s_tokens['l4']}? {s_tokens['mask']}. "
-                )
-            else:
-                raise ValueError(f'Unknown prompt type: {prompt_type}')
-        else:
-            raise ValueError(f'Unknown prompt type: {prompt_type}')
     else:
         raise ValueError(f'Unknown prompt type: {prompt_type}')
     normal_s_tokens = [s_tokens['e1s'], s_tokens['e1e'], s_tokens['e2s'], s_tokens['e2e']] if '_h' in prompt_type else [
         s_tokens['e1s'], s_tokens['e1e'], s_tokens['e2s'], s_tokens['e2e'], 
         s_tokens['l1'], s_tokens['l2'], s_tokens['l3'], s_tokens['l4'], s_tokens['l5'], s_tokens['l6']
     ]
+    normal_s_tokens += [f'<st_{t_id}>' for t_id in range(len(EVENT_SUBTYPES) + 1)]
     return {
         'template': template, 
         'special_tokens': normal_s_tokens
@@ -457,6 +431,8 @@ def create_multi_template(e1_trigger:str, e2_trigger:str, e1_arg_str: str, e2_ar
         s_tokens['e1s'], s_tokens['e1e'], s_tokens['e2s'], s_tokens['e2e'], 
         s_tokens['l1'], s_tokens['l2'], s_tokens['l3'], s_tokens['l4'], s_tokens['l5'], s_tokens['l6']
     ]
+    normal_s_tokens += ['<match>', '<mismatch>']
+    normal_s_tokens += [f'<st_{t_id}>' for t_id in range(len(EVENT_SUBTYPES) + 1)]
     return {
         'prefix_template': prefix_template, 
         'e1_anchor_template': e1_anchor_temp, 

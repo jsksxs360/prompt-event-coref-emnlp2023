@@ -2,25 +2,8 @@ from torch.utils.data import Dataset, DataLoader
 import json
 from tqdm.auto import tqdm
 from collections import defaultdict
+from utils import PROMPT_TYPE, EVENT_SUBTYPES, subtype2id, id2subtype
 from utils import create_prompt
-
-PROMPT_TYPE = [
-    'hn', 'hm', 'hq', # base prompts 
-    'sn', 'sm', 'sq', # (hard/soft normal/middle/question)
-    't_hn', 'ta_hn', 't_hm', 'ta_hm', 't_hq', 'ta_hq', # knowledge enhanced prompts 
-    't_sn', 'ta_sn', 't_sm', 'ta_sm', 't_sq', 'ta_sq', # (subtype/subtype-argument)
-    'm_ht_hn', 'm_ht_hm', 'm_ht_hq', 'm_hta_hn', 'm_hta_hm', 'm_hta_hq', # mix prompts
-    'm_st_hn', 'm_st_hm', 'm_st_hq', 'm_sta_hn', 'm_sta_hm', 'm_sta_hq'  # (hard/soft subtype/argument/subtype-argument)
-]
-
-EVENT_SUBTYPES = [ # 18 subtypes
-    'artifact', 'transferownership', 'transaction', 'broadcast', 'contact', 'demonstrate', \
-    'injure', 'transfermoney', 'transportartifact', 'attack', 'meet', 'elect', \
-    'endposition', 'correspondence', 'arrestjail', 'startposition', 'transportperson', 'die'
-]
-id2subtype = {idx: c for idx, c in enumerate(EVENT_SUBTYPES, start=1)}
-id2subtype[0] = 'other'
-subtype2id = {v: k for k, v in id2subtype.items()}
 
 def get_pred_arguments(arg_file:str) -> dict:
     '''
@@ -247,8 +230,8 @@ class KBPCorefTiny(Dataset):
     def __getitem__(self, idx):
         return self.data[idx]
 
-def get_dataLoader(args, dataset, tokenizer, collote_fn_type:str, verbalizer:dict, batch_size:int=None, shuffle:bool=False):
-    assert collote_fn_type in ['base_prompt', 'knowledge_prompt', 'mix_prompt']
+def get_dataLoader(args, dataset, tokenizer, prompt_type:str, verbalizer:dict, batch_size:int=None, shuffle:bool=False):
+    assert prompt_type in PROMPT_TYPE
     pos_id, neg_id = verbalizer['coref']['id'], verbalizer['non-coref']['id']
     match_id, mismatch_id = verbalizer['match']['id'], verbalizer['mismatch']['id']
     event_type_ids = {
@@ -402,11 +385,11 @@ def get_dataLoader(args, dataset, tokenizer, collote_fn_type:str, verbalizer:dic
             'labels': batch_label
         }
 
-    if collote_fn_type == 'base_prompt':
+    if prompt_type.startswith('h') or prompt_type.startswith('s'): # base prompt
         select_collote_fn = collote_fn
-    elif collote_fn_type == 'knowledge_prompt':
+    elif prompt_type.startswith('t'): # knowledge prompt
         select_collote_fn = collote_fn_with_subtype
-    elif collote_fn_type == 'mix_prompt':
+    elif prompt_type.startswith('m'): # multi prompt
         select_collote_fn = collote_fn_with_subtype_and_match
     
     return DataLoader(
@@ -441,6 +424,7 @@ if __name__ == '__main__':
     args.max_seq_length = 512
     args.model_type = 'longformer'
     args.model_checkpoint = '../../PT_MODELS/allenai/longformer-large-4096'
+    args.prompt_type = 'm_hta_hn'
 
     tokenizer = AutoTokenizer.from_pretrained(args.model_checkpoint)
     base_sp_tokens = ['<e1_start>', '<e1_end>', '<e2_start>', '<e2_end>', '<l1>', '<l2>', '<l3>', '<l4>', '<l5>', '<l6>']
@@ -464,7 +448,7 @@ if __name__ == '__main__':
 
     train_small_data = KBPCorefTiny(
         '../../data/train_filtered.json', '../../data/train_filtered_with_cos.json', '../../data/EventExtraction/omni_train_pred_args.json', 
-        neg_top_k=3, prompt_type='m_hta_hn', model_type='longformer', tokenizer=tokenizer, max_length=512
+        neg_top_k=3, prompt_type=args.prompt_type, model_type='longformer', tokenizer=tokenizer, max_length=512
     )
     print_data_statistic('../../data/train_filtered_with_cos.json')
     print(len(train_small_data))
@@ -482,17 +466,57 @@ if __name__ == '__main__':
     for subtype, s_id in subtype2id.items():
         verbalizer[subtype] = {'token': f'<st_{s_id}>', 'id': tokenizer.convert_tokens_to_ids(f'<st_{s_id}>')}
     # print(verbalizer)
-    # normal
-    print('=' * 20, 'base_prompt')
-    train_dataloader = get_dataLoader(args, train_small_data, tokenizer, collote_fn_type='base_prompt', verbalizer=verbalizer, shuffle=True)
-    batch_data = next(iter(train_dataloader))
-    batch_X, batch_y = batch_data['batch_inputs'], batch_data['labels']
-    print('batch_X shape:', {k: v.shape for k, v in batch_X.items()})
-    print('batch_y shape:', len(batch_y))
-    print(batch_X)
-    print(batch_y)
-    print(tokenizer.decode(batch_X['input_ids'][0]))
-    print('Testing dataloader...')
-    batch_datas = iter(train_dataloader)
-    for step in tqdm(range(len(train_dataloader))):
-        next(batch_datas)
+    if args.prompt_type.startswith('h') or args.prompt_type.startswith('s'): # base prompt
+        print('=' * 20, 'base prompt')
+        train_dataloader = get_dataLoader(args, train_small_data, tokenizer, prompt_type=args.prompt_type, verbalizer=verbalizer, shuffle=True)
+        batch_data = next(iter(train_dataloader))
+        print('batch_inputs shape:', {k: v.shape for k, v in batch_data['batch_inputs'].items()})
+        print('batch_inputs: ', batch_data['batch_inputs'])
+        print('batch_mask_idx:', batch_data['batch_mask_idx'])
+        print('batch_event_idx:', batch_data['batch_event_idx'])
+        print('labels:', batch_data['labels'])
+        print(tokenizer.decode(batch_data['batch_inputs']['input_ids'][0]))
+        print('Testing dataloader...')
+        batch_datas = iter(train_dataloader)
+        for step in tqdm(range(len(train_dataloader))):
+            next(batch_datas)
+    elif args.prompt_type.startswith('t'): # knowledge prompt
+        print('=' * 20, 'knowledge prompt')
+        train_dataloader = get_dataLoader(args, train_small_data, tokenizer, prompt_type=args.prompt_type, verbalizer=verbalizer, shuffle=True)
+        batch_data = next(iter(train_dataloader))
+        print('batch_inputs shape:', {k: v.shape for k, v in batch_data['batch_inputs'].items()})
+        print('batch_inputs: ', batch_data['batch_inputs'])
+        print('batch_mask_idx:', batch_data['batch_mask_idx'])
+        print('batch_event_idx:', batch_data['batch_event_idx'])
+        print('batch_t1_mask_idx:', batch_data['batch_t1_mask_idx'])
+        print('batch_t2_mask_idx:', batch_data['batch_t2_mask_idx'])
+        print('subtype1:', batch_data['subtype1'])
+        print('subtype2:', batch_data['subtype2'])
+        print('labels:', batch_data['labels'])
+        print(tokenizer.decode(batch_data['batch_inputs']['input_ids'][0]))
+        print('Testing dataloader...')
+        batch_datas = iter(train_dataloader)
+        for step in tqdm(range(len(train_dataloader))):
+            next(batch_datas)
+    elif args.prompt_type.startswith('m'): # multi prompt
+        print('=' * 20, 'multi prompt')
+        train_dataloader = get_dataLoader(args, train_small_data, tokenizer, prompt_type=args.prompt_type, verbalizer=verbalizer, shuffle=True)
+        batch_data = next(iter(train_dataloader))
+        print('batch_inputs shape:', {k: v.shape for k, v in batch_data['batch_inputs'].items()})
+        print('batch_inputs: ', batch_data['batch_inputs'])
+        print('batch_mask_idx:', batch_data['batch_mask_idx'])
+        print('batch_type_match_mask_idx', batch_data['batch_type_match_mask_idx'])
+        print('batch_arg_match_mask_idx', batch_data['batch_arg_match_mask_idx'])
+        print('batch_event_idx:', batch_data['batch_event_idx'])
+        print('batch_t1_mask_idx:', batch_data['batch_t1_mask_idx'])
+        print('batch_t2_mask_idx:', batch_data['batch_t2_mask_idx'])
+        print('type_match', batch_data['type_match'])
+        print('arg_match', batch_data['arg_match'])
+        print('subtype1:', batch_data['subtype1'])
+        print('subtype2:', batch_data['subtype2'])
+        print('labels:', batch_data['labels'])
+        print(tokenizer.decode(batch_data['batch_inputs']['input_ids'][0]))
+        print('Testing dataloader...')
+        batch_datas = iter(train_dataloader)
+        for step in tqdm(range(len(train_dataloader))):
+            next(batch_datas)
