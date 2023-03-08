@@ -2,8 +2,8 @@ from torch.utils.data import Dataset, DataLoader
 import json
 from tqdm.auto import tqdm
 from collections import defaultdict
-from utils import PROMPT_TYPE, EVENT_SUBTYPES, subtype2id, id2subtype
-from utils import create_prompt
+from prompt import PROMPT_TYPE, EVENT_SUBTYPES, subtype2id, id2subtype
+from prompt import create_prompt
 
 def get_pred_arguments(arg_file:str) -> dict:
     '''
@@ -389,7 +389,7 @@ def get_dataLoader(args, dataset, tokenizer, prompt_type:str, verbalizer:dict, b
         select_collote_fn = collote_fn
     elif prompt_type.startswith('t'): # knowledge prompt
         select_collote_fn = collote_fn_with_subtype
-    elif prompt_type.startswith('m'): # multi prompt
+    elif prompt_type.startswith('m'): # mix prompt
         select_collote_fn = collote_fn_with_subtype_and_match
     
     return DataLoader(
@@ -424,14 +424,15 @@ if __name__ == '__main__':
     args.max_seq_length = 512
     args.model_type = 'longformer'
     args.model_checkpoint = '../../PT_MODELS/allenai/longformer-large-4096'
-    args.prompt_type = 'm_hta_hn'
+    args.prompt_type = 'm_hta_hq'
 
     tokenizer = AutoTokenizer.from_pretrained(args.model_checkpoint)
     base_sp_tokens = ['<e1_start>', '<e1_end>', '<e2_start>', '<e2_end>', '<l1>', '<l2>', '<l3>', '<l4>', '<l5>', '<l6>']
     match_sp_tokens = ['<match>', '<mismatch>']
+    connect_tokens = ['<refer_to>', '<not_refer_to>']
     type_sp_tokens = [f'<st_{t_id}>' for t_id in range(len(EVENT_SUBTYPES) + 1)]
     special_tokens_dict = {
-        'additional_special_tokens': base_sp_tokens + match_sp_tokens + type_sp_tokens
+        'additional_special_tokens': base_sp_tokens + match_sp_tokens + connect_tokens + type_sp_tokens
     }
     tokenizer.add_special_tokens(special_tokens_dict)
 
@@ -458,8 +459,20 @@ if __name__ == '__main__':
     #     print(train_small_data[i])
     
     verbalizer = {
-        'coref': {'token': 'same', 'id': tokenizer.convert_tokens_to_ids('same')}, 
-        'non-coref': {'token': 'different', 'id': tokenizer.convert_tokens_to_ids('different')}, 
+        'coref': {
+            'token': '<refer_to>', 'id': tokenizer.convert_tokens_to_ids('<refer_to>')
+        } if 'c' in args.prompt_type else {
+            'token': 'yes', 'id': tokenizer.convert_tokens_to_ids('yes')
+        } if 'q' in args.prompt_type else {
+            'token': 'same', 'id': tokenizer.convert_tokens_to_ids('same')
+        } , 
+        'non-coref': {
+            'token': '<not_refer_to>', 'id': tokenizer.convert_tokens_to_ids('<not_refer_to>')
+        } if 'c' in args.prompt_type else {
+            'token': 'no', 'id': tokenizer.convert_tokens_to_ids('no')
+        } if 'q' in args.prompt_type else {
+            'token': 'different', 'id': tokenizer.convert_tokens_to_ids('different')
+        }, 
         'match': {'token': '<match>', 'id': tokenizer.convert_tokens_to_ids('<match>')}, 
         'mismatch': {'token': '<mismatch>', 'id': tokenizer.convert_tokens_to_ids('<mismatch>')}
     }
@@ -498,8 +511,8 @@ if __name__ == '__main__':
         batch_datas = iter(train_dataloader)
         for step in tqdm(range(len(train_dataloader))):
             next(batch_datas)
-    elif args.prompt_type.startswith('m'): # multi prompt
-        print('=' * 20, 'multi prompt')
+    elif args.prompt_type.startswith('m'): # mix prompt
+        print('=' * 20, 'mix prompt')
         train_dataloader = get_dataLoader(args, train_small_data, tokenizer, prompt_type=args.prompt_type, verbalizer=verbalizer, shuffle=True)
         batch_data = next(iter(train_dataloader))
         print('batch_inputs shape:', {k: v.shape for k, v in batch_data['batch_inputs'].items()})
