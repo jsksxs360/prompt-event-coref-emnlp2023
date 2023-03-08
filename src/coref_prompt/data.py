@@ -233,11 +233,13 @@ class KBPCorefTiny(Dataset):
 def get_dataLoader(args, dataset, tokenizer, prompt_type:str, verbalizer:dict, batch_size:int=None, shuffle:bool=False):
     assert prompt_type in PROMPT_TYPE
     pos_id, neg_id = verbalizer['coref']['id'], verbalizer['non-coref']['id']
-    match_id, mismatch_id = verbalizer['match']['id'], verbalizer['mismatch']['id']
-    event_type_ids = {
-        subtype_id: verbalizer[id2subtype[subtype_id]]['id']
-        for subtype_id in range(len(EVENT_SUBTYPES) + 1)
-    }
+    if prompt_type.startswith('m'):
+        match_id, mismatch_id = verbalizer['match']['id'], verbalizer['mismatch']['id']
+    if prompt_type.startswith('t'):
+        event_type_ids = {
+            s_id: verbalizer[subtype]['id']
+            for s_id, subtype in id2subtype.items()
+        }
 
     def collote_fn(batch_samples):
         batch_sen, batch_mask_idx, batch_event_idx, batch_labels = [], [], [], []

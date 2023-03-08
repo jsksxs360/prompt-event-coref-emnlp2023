@@ -675,3 +675,72 @@ def create_prompt(
             'e2e_offset': e2e_offset, 
             'e2_type_mask_offset': e2_type_mask_offset, 
         }
+
+def create_verbalizer(tokenizer, model_type, prompt_type):
+    base_verbalizer = {
+        'coref': {
+            'token': '[REFER_TO]' if model_type == 'bert' else '<refer_to>', 
+            'id': tokenizer.convert_tokens_to_ids('[REFER_TO]' if model_type == 'bert' else '<refer_to>'), 
+            'description': 'refer to'
+        } if 'c' in prompt_type else {
+            'token': 'yes', 'id': tokenizer.convert_tokens_to_ids('yes')
+        } if 'q' in prompt_type else {
+            'token': 'same', 'id': tokenizer.convert_tokens_to_ids('same')
+        } , 
+        'non-coref': {
+            'token': '[NOT_REFER_TO]' if model_type == 'bert' else '<not_refer_to>', 
+            'id': tokenizer.convert_tokens_to_ids('[NOT_REFER_TO]' if model_type == 'bert' else '<not_refer_to>'), 
+            'description': 'not refer to'
+        } if 'c' in prompt_type else {
+            'token': 'no', 'id': tokenizer.convert_tokens_to_ids('no')
+        } if 'q' in prompt_type else {
+            'token': 'different', 'id': tokenizer.convert_tokens_to_ids('different')
+        }
+    }
+    if prompt_type.startswith('h') or prompt_type.startswith('s'): # base prompt
+        return base_verbalizer
+    else:
+        for subtype, s_id in subtype2id.items():
+            base_verbalizer[subtype] = {
+                'token': f'[ST_{s_id}]' if model_type == 'bert' else f'<st_{s_id}>', 
+                'id': tokenizer.convert_tokens_to_ids(f'[ST_{s_id}]' if model_type == 'bert' else f'<st_{s_id}>'), 
+                'description': 'XXXXXXXXXXXXX' ########################################
+            }
+        if prompt_type.startswith('t'): # knowledge prompt
+            return base_verbalizer
+        elif prompt_type.startswith('m'): # mix prompt
+            base_verbalizer['match'] = {
+                'token': '[MATCH]' if model_type == 'bert' else '<match>', 
+                'id': tokenizer.convert_tokens_to_ids('[MATCH]' if model_type == 'bert' else '<match>')
+            }
+            base_verbalizer['mismatch'] = {
+                'token': '[MISMATCH]' if model_type == 'bert' else '<mismatch>', 
+                'id': tokenizer.convert_tokens_to_ids('[MISMATCH]' if model_type == 'bert' else '<mismatch>')
+            }
+            return base_verbalizer
+
+def get_special_tokens(model_type, token_type):
+    assert token_type in ['base', 'connect', 'match', 'event_subtype']
+    if token_type == 'base':
+        return [
+            '[E1_START]', '[E1_END]', '[E2_START]', '[E2_END]', '[L1]', '[L2]', '[L3]', '[L4]', '[L5]', '[L6]'
+        ] if model_type == 'bert' else [
+            '<e1_start>', '<e1_end>', '<e2_start>', '<e2_end>', '<l1>', '<l2>', '<l3>', '<l4>', '<l5>', '<l6>'
+        ]
+    elif token_type == 'connect':
+        return [
+            '[REFER_TO]', '[NOT_REFER_TO]'
+        ] if model_type == 'bert' else [
+            '<refer_to>', '<not_refer_to>'
+        ]
+    elif token_type == 'match':
+        return [
+            '[MATCH]', '[MISMATCH]'
+        ] if model_type == 'bert' else [
+            '<match>', '<mismatch>'
+        ]
+    elif token_type == 'event_subtype':
+        return [
+            f'[ST_{i}]' if model_type == 'bert' else f'<st_{i}>' 
+            for i in range(len(EVENT_SUBTYPES) + 1)
+        ]
