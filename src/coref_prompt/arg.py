@@ -8,12 +8,11 @@ def parse_args():
     )
     parser.add_argument("--argument_file", default=None, type=str, required=True, help="The input recognized argument file.")
     parser.add_argument("--train_file", default=None, type=str, required=True, help="The input training file.")
+    parser.add_argument("--train_file_with_cos", default=None, type=str, required=False, help="Input training file with similarities.")
     parser.add_argument("--dev_file", default=None, type=str, required=True, help="The input evaluation file.")
     parser.add_argument("--test_file", default=None, type=str, required=True, help="The input testing file.")
-    parser.add_argument("--train_file_with_cos", default=None, type=str, required=False, help="Input training file with similarities.")
     # using normal/tiny dataset
     parser.add_argument("--train_data_type", default="tiny", type=str, required=True, choices=['normal', 'tiny'])
-    parser.add_argument("--pos_top_k", default="0", type=int, help="select top k coref events for each event")
     parser.add_argument("--neg_top_k", default="1", type=int, help="select top k non-coref events for each event")
     
     parser.add_argument("--model_type", default="bert", type=str, required=True, choices=['bert', 'roberta', 'longformer'])
@@ -25,6 +24,15 @@ def parse_args():
     parser.add_argument("--prompt_type", type=str, required=True)
     parser.add_argument("--matching_style", default="none", type=str, required=True, 
         help="incorporate event matching representations"
+    )
+    parser.add_argument("--cosine_space_dim", default=64, type=int, required=True, 
+        help="reduce event embedding dimension"
+    )
+    parser.add_argument("--cosine_slices", default=128, type=int, required=True, 
+        help="cosine matching perspectives"
+    )
+    parser.add_argument("--cosine_factor", default=4, type=int, required=True, 
+        help="tensor factorization"
     )
     
     parser.add_argument("--do_train", action="store_true", help="Whether to run training.")

@@ -240,7 +240,7 @@ def get_dataLoader(args, dataset, tokenizer, prompt_type:str, verbalizer:dict, b
     }
 
     def collote_fn(batch_samples):
-        batch_sen, batch_mask_idx, batch_event_idx, batch_coref = [], [], [], []
+        batch_sen, batch_mask_idx, batch_event_idx, batch_labels = [], [], [], []
         for sample in batch_samples:
             batch_sen.append(sample['prompt'])
             # convert char offsets to token idxs
@@ -255,7 +255,7 @@ def get_dataLoader(args, dataset, tokenizer, prompt_type:str, verbalizer:dict, b
             assert None not in [mask_idx, e1s_idx, e1e_idx, e2s_idx, e2e_idx]
             batch_mask_idx.append(mask_idx)
             batch_event_idx.append([e1s_idx, e1e_idx, e2s_idx, e2e_idx])
-            batch_coref.append(sample['label'])
+            batch_labels.append(int(sample['label']))
         batch_inputs = tokenizer(
             batch_sen, 
             max_length=args.max_seq_length, 
@@ -263,11 +263,11 @@ def get_dataLoader(args, dataset, tokenizer, prompt_type:str, verbalizer:dict, b
             truncation=True, 
             return_tensors="pt"
         )
-        batch_labels = [pos_id if coref == 1 else neg_id for coref in batch_coref]
         return {
             'batch_inputs': batch_inputs, 
             'batch_mask_idx': batch_mask_idx, 
             'batch_event_idx': batch_event_idx, 
+            'label_word_id': [neg_id, pos_id], 
             'labels': batch_labels
         }
     
@@ -460,14 +460,16 @@ if __name__ == '__main__':
     
     verbalizer = {
         'coref': {
-            'token': '<refer_to>', 'id': tokenizer.convert_tokens_to_ids('<refer_to>')
+            'token': '<refer_to>', 'id': tokenizer.convert_tokens_to_ids('<refer_to>'), 
+            'description': 'refer to'
         } if 'c' in args.prompt_type else {
             'token': 'yes', 'id': tokenizer.convert_tokens_to_ids('yes')
         } if 'q' in args.prompt_type else {
             'token': 'same', 'id': tokenizer.convert_tokens_to_ids('same')
         } , 
         'non-coref': {
-            'token': '<not_refer_to>', 'id': tokenizer.convert_tokens_to_ids('<not_refer_to>')
+            'token': '<not_refer_to>', 'id': tokenizer.convert_tokens_to_ids('<not_refer_to>'), 
+            'description': 'not refer to'
         } if 'c' in args.prompt_type else {
             'token': 'no', 'id': tokenizer.convert_tokens_to_ids('no')
         } if 'q' in args.prompt_type else {
