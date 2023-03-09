@@ -27,7 +27,7 @@ def parse_args():
     parser.add_argument("--max_seq_length", default=512, type=int, required=True)
     parser.add_argument("--prompt_type", type=str, required=True)
     parser.add_argument("--matching_style", default="none", type=str, required=True, 
-        help="incorporate event matching representations"
+        help="incorporate event matching representations", choices=['product', 'cosine', 'product_cosine']
     )
     parser.add_argument("--cosine_space_dim", default=64, type=int, required=True, 
         help="reduce event embedding dimension"

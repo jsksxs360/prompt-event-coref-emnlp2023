@@ -704,22 +704,28 @@ def create_verbalizer(tokenizer, model_type, prompt_type):
             base_verbalizer[subtype] = {
                 'token': f'[ST_{s_id}]' if model_type == 'bert' else f'<st_{s_id}>', 
                 'id': tokenizer.convert_tokens_to_ids(f'[ST_{s_id}]' if model_type == 'bert' else f'<st_{s_id}>'), 
-                'description': 'XXXXXXXXXXXXX' ########################################
+                'description': subtype if subtype != 'other' else 'normal'
             }
         if prompt_type.startswith('t'): # knowledge prompt
             return base_verbalizer
         elif prompt_type.startswith('m'): # mix prompt
             base_verbalizer['match'] = {
                 'token': '[MATCH]' if model_type == 'bert' else '<match>', 
-                'id': tokenizer.convert_tokens_to_ids('[MATCH]' if model_type == 'bert' else '<match>')
+                'id': tokenizer.convert_tokens_to_ids('[MATCH]' if model_type == 'bert' else '<match>'), 
+                'description': 'same related relevant similar matching matched'
             }
             base_verbalizer['mismatch'] = {
                 'token': '[MISMATCH]' if model_type == 'bert' else '<mismatch>', 
-                'id': tokenizer.convert_tokens_to_ids('[MISMATCH]' if model_type == 'bert' else '<mismatch>')
+                'id': tokenizer.convert_tokens_to_ids('[MISMATCH]' if model_type == 'bert' else '<mismatch>'), 
+                'description': 'different unrelated irrelevant dissimilar mismatched'
             }
             return base_verbalizer
 
-def get_special_tokens(model_type, token_type):
+def get_special_tokens(model_type:str, token_type:str):
+    '''
+    token_type:
+        'base', 'connect', 'match', 'event_subtype'
+    '''
     assert token_type in ['base', 'connect', 'match', 'event_subtype']
     if token_type == 'base':
         return [

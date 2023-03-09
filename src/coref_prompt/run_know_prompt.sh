@@ -1,8 +1,8 @@
-export OUTPUT_DIR=./longformer_hn_512_product_cosine_results/
+export OUTPUT_DIR=./longformer_ta_hn_512_product_cosine_results/
 
-python3 run_base_prompt.py \
+python3 run_know_prompt.py \
     --output_dir=$OUTPUT_DIR \
-    --prompt_type=hn \
+    --prompt_type=ta_hn \
     --matching_style=product_cosine \
     --cosine_space_dim=64 \
     --cosine_slices=128 \

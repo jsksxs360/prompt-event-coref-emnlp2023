@@ -274,8 +274,9 @@ def get_dataLoader(args, dataset, tokenizer, prompt_type:str, verbalizer:dict, b
         }
     
     def collote_fn_with_subtype(batch_samples):
-        batch_sen, batch_mask_idx, batch_event_idx, batch_coref = [], [], [], []
-        batch_e1_type_mask_idx, batch_e2_type_mask_idx, batch_e1_type, batch_e2_type = [], [], [], []
+        batch_sen, batch_mask_idx, batch_event_idx  = [], [], []
+        batch_e1_type_mask_idx, batch_e2_type_mask_idx = [], []
+        batch_labels, batch_e1_type_labels, batch_e2_type_labels = [], [], []
         for sample in batch_samples:
             batch_sen.append(sample['prompt'])
             # convert char offsets to token idxs
@@ -292,15 +293,16 @@ def get_dataLoader(args, dataset, tokenizer, prompt_type:str, verbalizer:dict, b
                 encoding.char_to_token(sample['e2_type_mask_offset'])
             )
             assert None not in [
-                mask_idx, e1s_idx, e1e_idx, e2s_idx, e2e_idx, e1_type_mask_idx, e2_type_mask_idx
+                mask_idx, e1s_idx, e1e_idx, e2s_idx, e2e_idx, 
+                e1_type_mask_idx, e2_type_mask_idx
             ]
             batch_mask_idx.append(mask_idx)
             batch_event_idx.append([e1s_idx, e1e_idx, e2s_idx, e2e_idx])
             batch_e1_type_mask_idx.append(e1_type_mask_idx)
             batch_e2_type_mask_idx.append(e2_type_mask_idx)
-            batch_coref.append(sample['label'])
-            batch_e1_type.append(sample['e1_subtype_id'])
-            batch_e2_type.append(sample['e2_subtype_id'])
+            batch_labels.append(int(sample['label']))
+            batch_e1_type_labels.append(int(sample['e1_subtype_id']))
+            batch_e2_type_labels.append(int(sample['e2_subtype_id']))
         batch_inputs = tokenizer(
             batch_sen, 
             max_length=args.max_seq_length, 
@@ -308,18 +310,17 @@ def get_dataLoader(args, dataset, tokenizer, prompt_type:str, verbalizer:dict, b
             truncation=True, 
             return_tensors="pt"
         )
-        batch_subtype1 = [event_type_ids[t] for t in batch_e1_type]
-        batch_subtype2 = [event_type_ids[t] for t in batch_e2_type]
-        batch_label = [pos_id if coref == 1 else neg_id  for coref in batch_coref]
         return {
             'batch_inputs': batch_inputs, 
             'batch_mask_idx': batch_mask_idx, 
             'batch_event_idx': batch_event_idx, 
             'batch_t1_mask_idx': batch_e1_type_mask_idx, 
             'batch_t2_mask_idx': batch_e2_type_mask_idx, 
-            'subtype1': batch_subtype1, 
-            'subtype2': batch_subtype2, 
-            'labels': batch_label
+            'label_word_id': [neg_id, pos_id], 
+            'subtype_label_word_id': [event_type_ids[i] for i in range(len(EVENT_SUBTYPES) + 1)], 
+            'labels': batch_labels, 
+            'e1_subtype_labels': batch_e1_type_labels, 
+            'e2_subtype_labels': batch_e2_type_labels
         }
 
     def collote_fn_with_subtype_and_match(batch_samples):

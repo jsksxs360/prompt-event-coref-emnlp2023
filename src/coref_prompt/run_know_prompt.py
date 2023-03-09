@@ -13,7 +13,8 @@ from src.tools import seed_everything, NpEncoder
 from src.coref_prompt.arg import parse_args
 from src.coref_prompt.data import KBPCoref, KBPCorefTiny, get_dataLoader
 from src.coref_prompt.data import get_pred_arguments
-from src.coref_prompt.modeling import BertForBasePrompt, RobertaForBasePrompt, LongformerForBasePrompt
+from src.coref_prompt.modeling import BertForKnowPrompt, RobertaForKnowPrompt, LongformerForKnowPrompt
+from src.coref_prompt.prompt import EVENT_SUBTYPES, id2subtype
 from src.coref_prompt.prompt import create_prompt, create_verbalizer, get_special_tokens
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
@@ -21,10 +22,10 @@ logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s - %(message)s
                     level=logging.INFO)
 logger = logging.getLogger("Model")
 
-BASE_PROMPT_MODELS = {
-    'bert': BertForBasePrompt,
-    'roberta': RobertaForBasePrompt, 
-    'longformer': LongformerForBasePrompt
+KNOW_PROMPT_MODELS = {
+    'bert': BertForKnowPrompt,
+    'roberta': RobertaForKnowPrompt, 
+    'longformer': LongformerForKnowPrompt
 }
 
 def to_device(args, batch_data):
@@ -34,7 +35,7 @@ def to_device(args, batch_data):
             new_batch_data[k] = {
                 k_: v_.to(args.device) for k_, v_ in v.items()
             }
-        elif k in ['batch_event_idx', 'label_word_id']:
+        elif k in ['batch_event_idx', 'label_word_id', 'subtype_label_word_id']:
             new_batch_data[k] = v
         else:
             new_batch_data[k] = torch.tensor(v).to(args.device)
@@ -175,8 +176,16 @@ def predict(
         encoding.char_to_token(prompt_data['e2s_offset']), 
         encoding.char_to_token(prompt_data['e2e_offset'])
     )
-    assert None not in [mask_idx, e1s_idx, e1e_idx, e2s_idx, e2e_idx]
+    e1_type_mask_idx, e2_type_mask_idx = (
+        encoding.char_to_token(prompt_data['e1_type_mask_offset']), 
+        encoding.char_to_token(prompt_data['e2_type_mask_offset'])
+    )
+    assert None not in [
+        mask_idx, e1s_idx, e1e_idx, e2s_idx, e2e_idx, 
+        e1_type_mask_idx, e2_type_mask_idx
+    ]
     event_idx = [e1s_idx, e1e_idx, e2s_idx, e2e_idx]
+    
     inputs = tokenizer(
         prompt_text, 
         max_length=args.max_seq_length, 
@@ -184,11 +193,21 @@ def predict(
         truncation=True, 
         return_tensors="pt"
     )
+    event_type_ids = {
+        s_id: verbalizer[subtype]['id']
+        for s_id, subtype in id2subtype.items()
+    }
     inputs = {
         'batch_inputs': inputs, 
         'batch_mask_idx': [mask_idx], 
         'batch_event_idx': [event_idx], 
-        'label_word_id': [neg_id, pos_id]
+        'batch_t1_mask_idx': [e1_type_mask_idx], 
+        'batch_t2_mask_idx': [e2_type_mask_idx], 
+        'label_word_id': [neg_id, pos_id], 
+        'subtype_label_word_id': [
+            verbalizer[id2subtype[s_id]]['id'] 
+            for s_id in range(len(EVENT_SUBTYPES) + 1)
+        ]
     }
     inputs = to_device(args, inputs)
     with torch.no_grad():
@@ -214,7 +233,7 @@ if __name__ == '__main__':
     logger.info(f'loading pretrained model and tokenizer of {args.model_type} ...')
     config = AutoConfig.from_pretrained(args.model_checkpoint, cache_dir=args.cache_dir)
     tokenizer = AutoTokenizer.from_pretrained(args.model_checkpoint, max_length=args.max_seq_length, cache_dir=args.cache_dir)
-    model = BASE_PROMPT_MODELS[args.model_type].from_pretrained(
+    model = KNOW_PROMPT_MODELS[args.model_type].from_pretrained(
         args.model_checkpoint,
         config=config, 
         args=args, 
@@ -222,7 +241,12 @@ if __name__ == '__main__':
     ).to(args.device)
     base_sp_tokens = get_special_tokens(args.model_type, 'base')
     connect_tokens = get_special_tokens(args.model_type, 'connect')
-    sp_tokens = base_sp_tokens + connect_tokens if 'c' in args.prompt_type else base_sp_tokens
+    event_subtype_tokens = get_special_tokens(args.model_type, 'event_subtype')
+    sp_tokens = (
+        base_sp_tokens + connect_tokens + event_subtype_tokens 
+        if 'c' in args.prompt_type else 
+        base_sp_tokens + event_subtype_tokens
+    )
     logger.info(f"adding special mark tokens {sp_tokens} to tokenizer...")
     tokenizer.add_special_tokens({'additional_special_tokens': sp_tokens})
     model.resize_token_embeddings(len(tokenizer))
@@ -231,7 +255,7 @@ if __name__ == '__main__':
     logger.info(f"verbalizer: {verbalizer}")
     if 'c' in args.prompt_type:
         logger.info(f"initialize embeddings for {verbalizer['coref']['token']} and {verbalizer['non-coref']['token']}...")
-        refer_idx, norefer_idx = -2, -1
+        refer_idx, norefer_idx = -(len(EVENT_SUBTYPES)+1+2), -(len(EVENT_SUBTYPES)+1+1)
         with torch.no_grad():
             refer_tokenized = tokenizer.tokenize(verbalizer['coref']['description'])
             refer_tokenized_ids = tokenizer.convert_tokens_to_ids(refer_tokenized)
@@ -252,6 +276,23 @@ if __name__ == '__main__':
                 model.longformer.embeddings.word_embeddings.weight[refer_idx, :] = new_embedding.clone().detach().requires_grad_(True)
                 new_embedding = model.longformer.embeddings.word_embeddings.weight[norefer_tokenized_ids].mean(axis=0)
                 model.longformer.embeddings.word_embeddings.weight[norefer_idx, :] = new_embedding.clone().detach().requires_grad_(True)
+    logger.info(f"initialize embeddings for event subtype special tokens...")
+    subtype_descriptions = [
+        verbalizer[id2subtype[s_id]]['description'] for s_id in range(len(EVENT_SUBTYPES) + 1)
+    ]
+    with torch.no_grad():
+        for i, description in enumerate(reversed(subtype_descriptions), start=1):
+            tokenized = tokenizer.tokenize(description)
+            tokenized_ids = tokenizer.convert_tokens_to_ids(tokenized)
+            if args.model_type == 'bert':
+                new_embedding = model.bert.embeddings.word_embeddings.weight[tokenized_ids].mean(axis=0)
+                model.bert.embeddings.word_embeddings.weight[-i, :] = new_embedding.clone().detach().requires_grad_(True)
+            elif args.model_type == 'roberta':
+                new_embedding = model.roberta.embeddings.word_embeddings.weight[tokenized_ids].mean(axis=0)
+                model.roberta.embeddings.word_embeddings.weight[-i, :] = new_embedding.clone().detach().requires_grad_(True)
+            else: # longformer
+                new_embedding = model.longformer.embeddings.word_embeddings.weight[tokenized_ids].mean(axis=0)
+                model.longformer.embeddings.word_embeddings.weight[-i, :] = new_embedding.clone().detach().requires_grad_(True)
     # Training
     if args.do_train:
         if args.train_data_type == 'normal':
@@ -362,3 +403,4 @@ if __name__ == '__main__':
             with open(os.path.join(args.output_dir, best_save_weight + save_name), 'wt', encoding='utf-8') as f:
                 for example_result in results:
                     f.write(json.dumps(example_result) + '\n')
+    
