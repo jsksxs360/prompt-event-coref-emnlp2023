@@ -22,7 +22,7 @@ logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s - %(message)s
                     level=logging.INFO)
 logger = logging.getLogger("Model")
 
-KNOW_PROMPT_MODELS = {
+MIX_PROMPT_MODELS = {
     'bert': BertForMixPrompt,
     'roberta': RobertaForMixPrompt, 
     'longformer': LongformerForMixPrompt
@@ -218,3 +218,215 @@ def predict(
     pred = logits.argmax(dim=-1)[0].item()
     prob = prob[pred].item()
     return pred, prob
+
+if __name__ == '__main__':
+    args = parse_args()
+    if args.do_train and os.path.exists(args.output_dir) and os.listdir(args.output_dir):
+        raise ValueError(f'Output directory ({args.output_dir}) already exists and is not empty.')
+    if not os.path.exists(args.output_dir):
+        os.mkdir(args.output_dir)
+    args.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    args.n_gpu = torch.cuda.device_count()
+    logger.warning(f'Using {args.device} device, n_gpu: {args.n_gpu}')
+    # Set seed
+    seed_everything(args.seed)
+    # Load pretrained model and tokenizer
+    logger.info(f'loading pretrained model and tokenizer of {args.model_type} ...')
+    config = AutoConfig.from_pretrained(args.model_checkpoint, cache_dir=args.cache_dir)
+    tokenizer = AutoTokenizer.from_pretrained(args.model_checkpoint, max_length=args.max_seq_length, cache_dir=args.cache_dir)
+    model = MIX_PROMPT_MODELS[args.model_type].from_pretrained(
+        args.model_checkpoint,
+        config=config, 
+        args=args, 
+        cache_dir=args.cache_dir
+    ).to(args.device)
+    base_sp_tokens = get_special_tokens(args.model_type, 'base')
+    connect_tokens = get_special_tokens(args.model_type, 'connect')
+    match_tokens = get_special_tokens(args.model_type, 'match')
+    event_subtype_tokens = get_special_tokens(args.model_type, 'event_subtype')
+    sp_tokens = (
+        base_sp_tokens + connect_tokens + match_tokens + event_subtype_tokens 
+        if 'c' in args.prompt_type else 
+        base_sp_tokens + match_tokens + event_subtype_tokens
+    )
+    logger.info(f"adding special mark tokens {sp_tokens} to tokenizer...")
+    tokenizer.add_special_tokens({'additional_special_tokens': sp_tokens})
+    model.resize_token_embeddings(len(tokenizer))
+    # build verbalizer
+    verbalizer = create_verbalizer(tokenizer, args.model_type, args.prompt_type)
+    logger.info(f"verbalizer: {verbalizer}")
+    if 'c' in args.prompt_type:
+        logger.info(f"initialize embeddings for {verbalizer['coref']['token']} and {verbalizer['non-coref']['token']}...")
+        subtype_sp_token_num = len(EVENT_SUBTYPES) + 1
+        match_sp_token_num = 2
+        refer_idx, norefer_idx = -(subtype_sp_token_num+match_sp_token_num+2), -(subtype_sp_token_num+match_sp_token_num+1)
+        with torch.no_grad():
+            refer_tokenized = tokenizer.tokenize(verbalizer['coref']['description'])
+            refer_tokenized_ids = tokenizer.convert_tokens_to_ids(refer_tokenized)
+            norefer_tokenized = tokenizer.tokenize(verbalizer['non-coref']['description'])
+            norefer_tokenized_ids = tokenizer.convert_tokens_to_ids(norefer_tokenized)
+            if args.model_type == 'bert':
+                new_embedding = model.bert.embeddings.word_embeddings.weight[refer_tokenized_ids].mean(axis=0)
+                model.bert.embeddings.word_embeddings.weight[refer_idx, :] = new_embedding.clone().detach().requires_grad_(True)
+                new_embedding = model.bert.embeddings.word_embeddings.weight[norefer_tokenized_ids].mean(axis=0)
+                model.bert.embeddings.word_embeddings.weight[norefer_idx, :] = new_embedding.clone().detach().requires_grad_(True)
+            elif args.model_type == 'roberta':
+                new_embedding = model.roberta.embeddings.word_embeddings.weight[refer_tokenized_ids].mean(axis=0)
+                model.roberta.embeddings.word_embeddings.weight[refer_idx, :] = new_embedding.clone().detach().requires_grad_(True)
+                new_embedding = model.roberta.embeddings.word_embeddings.weight[norefer_tokenized_ids].mean(axis=0)
+                model.roberta.embeddings.word_embeddings.weight[norefer_idx, :] = new_embedding.clone().detach().requires_grad_(True)
+            else: # longformer
+                new_embedding = model.longformer.embeddings.word_embeddings.weight[refer_tokenized_ids].mean(axis=0)
+                model.longformer.embeddings.word_embeddings.weight[refer_idx, :] = new_embedding.clone().detach().requires_grad_(True)
+                new_embedding = model.longformer.embeddings.word_embeddings.weight[norefer_tokenized_ids].mean(axis=0)
+                model.longformer.embeddings.word_embeddings.weight[norefer_idx, :] = new_embedding.clone().detach().requires_grad_(True)
+    logger.info(f"initialize embeddings for {verbalizer['match']['token']} and {verbalizer['mismatch']['token']}...")
+    subtype_sp_token_num = len(EVENT_SUBTYPES) + 1
+    match_idx, mismatch_idx = -(subtype_sp_token_num+2), -(subtype_sp_token_num+1)
+    with torch.no_grad():
+        match_tokenized = tokenizer.tokenize(verbalizer['match']['description'])
+        match_tokenized_ids = tokenizer.convert_tokens_to_ids(match_tokenized)
+        mismatch_tokenized = tokenizer.tokenize(verbalizer['mismatch']['description'])
+        mismatch_tokenized_ids = tokenizer.convert_tokens_to_ids(mismatch_tokenized)
+        if args.model_type == 'bert':
+            new_embedding = model.bert.embeddings.word_embeddings.weight[match_tokenized_ids].mean(axis=0)
+            model.bert.embeddings.word_embeddings.weight[match_idx, :] = new_embedding.clone().detach().requires_grad_(True)
+            new_embedding = model.bert.embeddings.word_embeddings.weight[mismatch_tokenized_ids].mean(axis=0)
+            model.bert.embeddings.word_embeddings.weight[mismatch_idx, :] = new_embedding.clone().detach().requires_grad_(True)
+        elif args.model_type == 'roberta':
+            new_embedding = model.roberta.embeddings.word_embeddings.weight[match_tokenized_ids].mean(axis=0)
+            model.roberta.embeddings.word_embeddings.weight[match_idx, :] = new_embedding.clone().detach().requires_grad_(True)
+            new_embedding = model.roberta.embeddings.word_embeddings.weight[mismatch_tokenized_ids].mean(axis=0)
+            model.roberta.embeddings.word_embeddings.weight[mismatch_idx, :] = new_embedding.clone().detach().requires_grad_(True)
+        else: # longformer
+            new_embedding = model.longformer.embeddings.word_embeddings.weight[match_tokenized_ids].mean(axis=0)
+            model.longformer.embeddings.word_embeddings.weight[match_idx, :] = new_embedding.clone().detach().requires_grad_(True)
+            new_embedding = model.longformer.embeddings.word_embeddings.weight[mismatch_tokenized_ids].mean(axis=0)
+            model.longformer.embeddings.word_embeddings.weight[mismatch_idx, :] = new_embedding.clone().detach().requires_grad_(True)
+    logger.info(f"initialize embeddings for event subtype special tokens...")
+    subtype_descriptions = [
+        verbalizer[id2subtype[s_id]]['description'] for s_id in range(len(EVENT_SUBTYPES) + 1)
+    ]
+    with torch.no_grad():
+        for i, description in enumerate(reversed(subtype_descriptions), start=1):
+            tokenized = tokenizer.tokenize(description)
+            tokenized_ids = tokenizer.convert_tokens_to_ids(tokenized)
+            if args.model_type == 'bert':
+                new_embedding = model.bert.embeddings.word_embeddings.weight[tokenized_ids].mean(axis=0)
+                model.bert.embeddings.word_embeddings.weight[-i, :] = new_embedding.clone().detach().requires_grad_(True)
+            elif args.model_type == 'roberta':
+                new_embedding = model.roberta.embeddings.word_embeddings.weight[tokenized_ids].mean(axis=0)
+                model.roberta.embeddings.word_embeddings.weight[-i, :] = new_embedding.clone().detach().requires_grad_(True)
+            else: # longformer
+                new_embedding = model.longformer.embeddings.word_embeddings.weight[tokenized_ids].mean(axis=0)
+                model.longformer.embeddings.word_embeddings.weight[-i, :] = new_embedding.clone().detach().requires_grad_(True)
+    # Training
+    if args.do_train:
+        if args.train_data_type == 'normal':
+            train_dataset = KBPCoref(
+                args.train_file, 
+                args.train_argument_file, 
+                prompt_type=args.prompt_type, 
+                model_type=args.model_type, 
+                tokenizer=tokenizer, 
+                max_length=args.max_seq_length
+            )
+        else:
+            train_dataset = KBPCorefTiny(
+                args.train_file, 
+                args.train_file_with_cos, 
+                args.train_argument_file, 
+                neg_top_k=args.neg_top_k, 
+                prompt_type=args.prompt_type, 
+                model_type=args.model_type, 
+                tokenizer=tokenizer, 
+                max_length=args.max_seq_length
+            )
+        labels = [train_dataset[s_idx]['label'] for s_idx in range(len(train_dataset))]
+        logger.info(f"[Train] Coref: {labels.count(1)} non-Coref: {labels.count(0)}")
+        dev_dataset = KBPCoref(
+            args.dev_file, 
+            args.dev_argument_file, 
+            prompt_type=args.prompt_type, 
+            model_type=args.model_type, 
+            tokenizer=tokenizer, 
+            max_length=args.max_seq_length
+        )
+        labels = [dev_dataset[s_idx]['label'] for s_idx in range(len(dev_dataset))]
+        logger.info(f"[Dev] Coref: {labels.count(1)} non-Coref: {labels.count(0)}")
+        train(args, train_dataset, dev_dataset, model, tokenizer, prompt_type=args.prompt_type, verbalizer=verbalizer)
+    save_weights = [file for file in os.listdir(args.output_dir) if file.endswith('.bin')]
+    # Testing
+    if args.do_test:
+        test_dataset = KBPCoref(
+            args.test_file, 
+            args.test_argument_file, 
+            prompt_type=args.prompt_type, 
+            model_type=args.model_type, 
+            tokenizer=tokenizer, 
+            max_length=args.max_seq_length
+        )
+        labels = [test_dataset[s_idx]['label'] for s_idx in range(len(test_dataset))]
+        logger.info(f"[Test] Coref: {labels.count(1)} non-Coref: {labels.count(0)}")
+        logger.info(f'loading trained weights from {args.output_dir} ...')
+        test(args, test_dataset, model, tokenizer, save_weights, prompt_type=args.prompt_type, verbalizer=verbalizer)
+    # Predicting
+    if args.do_predict:
+        sentence_dict = defaultdict(list) # {filename: [Sentence]}
+        sentence_len_dict = defaultdict(list) # {filename: [sentence length]}
+        argument_dict = get_pred_arguments(args.pred_test_argument_file)
+        with open(args.test_file, 'rt', encoding='utf-8') as f:
+            for line in f:
+                sample = json.loads(line.strip())
+                sentences = sample['sentences']
+                sentences_lengths = [len(tokenizer.tokenize(sent['text'])) for sent in sentences]
+                sentence_dict[sample['doc_id']] = sentences
+                sentence_len_dict[sample['doc_id']] = sentences_lengths
+        
+        pred_event_file = '../../data/epoch_3_test_pred_events.json'
+
+        for best_save_weight in save_weights:
+            logger.info(f'loading weights from {best_save_weight}...')
+            model.load_state_dict(torch.load(os.path.join(args.output_dir, best_save_weight)))
+            logger.info(f'predicting coref labels of {best_save_weight}...')
+
+            results = []
+            model.eval()
+            with open(pred_event_file, 'rt' , encoding='utf-8') as f_in:
+                for line in tqdm(f_in.readlines()):
+                    sample = json.loads(line.strip())
+                    events_from_file = sample['pred_label']
+                    sentences = sentence_dict[sample['doc_id']]
+                    sentence_lengths = sentence_len_dict[sample['doc_id']]
+                    doc_args = argument_dict[sample['doc_id']]
+                    preds, probs = [], []
+                    for i in range(len(events_from_file) - 1):
+                        for j in range(i + 1, len(events_from_file)):
+                            e_i, e_j = events_from_file[i], events_from_file[j]
+                            pred, prob = predict(
+                                args, model, tokenizer,
+                                e_i['start'], e_i['trigger'], doc_args[e_i['start']], 
+                                e_j['start'], e_j['trigger'], doc_args[e_j['start']], 
+                                sentences, sentence_lengths, 
+                                args.prompt_type, verbalizer
+                            )
+                            preds.append(pred)
+                            probs.append(prob)
+                    results.append({
+                        "doc_id": sample['doc_id'], 
+                        "document": sample['document'], 
+                        "sentences": sentences, 
+                        "events": [
+                            {
+                                'start': e['start'], 
+                                'end': e['start'] + len(e['trigger']) - 1, 
+                                'trigger': e['trigger']
+                            } for e in events_from_file
+                        ], 
+                        "pred_label": preds, 
+                        "pred_prob": probs
+                    })
+            save_name = f'_{args.model_type}_{args.prompt_type}_test_pred_corefs.json'
+            with open(os.path.join(args.output_dir, best_save_weight + save_name), 'wt', encoding='utf-8') as f:
+                for example_result in results:
+                    f.write(json.dumps(example_result) + '\n')

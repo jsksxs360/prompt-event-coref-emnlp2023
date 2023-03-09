@@ -235,7 +235,7 @@ def get_dataLoader(args, dataset, tokenizer, prompt_type:str, verbalizer:dict, b
     pos_id, neg_id = verbalizer['coref']['id'], verbalizer['non-coref']['id']
     if prompt_type.startswith('m'):
         match_id, mismatch_id = verbalizer['match']['id'], verbalizer['mismatch']['id']
-    if prompt_type.startswith('t'):
+    if prompt_type.startswith('m') or prompt_type.startswith('t'):
         event_type_ids = {
             s_id: verbalizer[subtype]['id']
             for s_id, subtype in id2subtype.items()

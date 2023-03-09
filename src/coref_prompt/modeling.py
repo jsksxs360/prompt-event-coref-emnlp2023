@@ -811,7 +811,7 @@ class LongformerForMixPrompt(LongformerPreTrainedModel):
             batch_event_1_reps = self.span_extractor(sequence_output, batch_e1_idx).squeeze(dim=1)
             batch_event_2_reps = self.span_extractor(sequence_output, batch_e2_idx).squeeze(dim=1)
             batch_match_reps = self._matching_func(batch_event_1_reps, batch_event_2_reps)
-            batch_mask_reps = self.mapping(torch.cat([batch_mask_reps, batch_match_reps], dim=-1))
+            batch_mask_reps = self.coref_mapping(torch.cat([batch_mask_reps, batch_match_reps], dim=-1))
             batch_arg_match_mask_reps = self.arg_match_mapping(torch.cat([batch_arg_match_mask_reps, batch_match_reps], dim=-1))
             # subtype matching
             batch_subtype_match_reps = self._matching_func(batch_t1_mask_reps, batch_t2_mask_reps)

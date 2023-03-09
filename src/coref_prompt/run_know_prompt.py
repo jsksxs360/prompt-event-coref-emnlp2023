@@ -249,7 +249,8 @@ if __name__ == '__main__':
     logger.info(f"verbalizer: {verbalizer}")
     if 'c' in args.prompt_type:
         logger.info(f"initialize embeddings for {verbalizer['coref']['token']} and {verbalizer['non-coref']['token']}...")
-        refer_idx, norefer_idx = -(len(EVENT_SUBTYPES)+1+2), -(len(EVENT_SUBTYPES)+1+1)
+        subtype_sp_token_num = len(EVENT_SUBTYPES) + 1
+        refer_idx, norefer_idx = -(subtype_sp_token_num+2), -(subtype_sp_token_num+1)
         with torch.no_grad():
             refer_tokenized = tokenizer.tokenize(verbalizer['coref']['description'])
             refer_tokenized_ids = tokenizer.convert_tokens_to_ids(refer_tokenized)
