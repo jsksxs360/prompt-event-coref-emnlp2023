@@ -164,7 +164,6 @@ def predict(
         sentences, sentences_lengths, 
         prompt_type, args.model_type, tokenizer, args.max_seq_length
     )
-    pos_id, neg_id = verbalizer['coref']['id'], verbalizer['non-coref']['id']
     prompt_text = prompt_data['prompt']
     # convert char offsets to token idxs
     encoding = tokenizer(prompt_text)
@@ -188,7 +187,7 @@ def predict(
         'batch_inputs': inputs, 
         'batch_mask_idx': [mask_idx], 
         'batch_event_idx': [event_idx], 
-        'label_word_id': [neg_id, pos_id]
+        'label_word_id': [verbalizer['non-coref']['id'], verbalizer['coref']['id']]
     }
     inputs = to_device(args, inputs)
     with torch.no_grad():

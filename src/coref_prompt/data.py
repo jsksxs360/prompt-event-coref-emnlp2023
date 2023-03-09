@@ -324,9 +324,12 @@ def get_dataLoader(args, dataset, tokenizer, prompt_type:str, verbalizer:dict, b
         }
 
     def collote_fn_with_subtype_and_match(batch_samples):
-        batch_sen, batch_mask_idx, batch_event_idx, batch_coref = [], [], [], []
-        batch_type_match_mask_idx, batch_arg_match_mask_idx, batch_type_match, batch_arg_match = [], [], [], []
-        batch_e1_type_mask_idx, batch_e2_type_mask_idx, batch_e1_type, batch_e2_type = [], [], [], []
+        batch_sen, batch_mask_idx, batch_event_idx = [], [], []
+        batch_type_match_mask_idx, batch_arg_match_mask_idx = [], []
+        batch_e1_type_mask_idx, batch_e2_type_mask_idx = [], []
+        batch_labels = []
+        batch_type_match_labels, batch_arg_match_labels = [], []
+        batch_e1_type_labels, batch_e2_type_labels = [], []
         for sample in batch_samples:
             batch_sen.append(sample['prompt'])
             # convert char offsets to token idxs
@@ -356,11 +359,11 @@ def get_dataLoader(args, dataset, tokenizer, prompt_type:str, verbalizer:dict, b
             batch_event_idx.append([e1s_idx, e1e_idx, e2s_idx, e2e_idx])
             batch_e1_type_mask_idx.append(e1_type_mask_idx)
             batch_e2_type_mask_idx.append(e2_type_mask_idx)
-            batch_coref.append(sample['label'])
-            batch_type_match.append(int(sample['e1_subtype_id'] == sample['e2_subtype_id']))
-            batch_arg_match.append(sample['label'])
-            batch_e1_type.append(sample['e1_subtype_id'])
-            batch_e2_type.append(sample['e2_subtype_id'])
+            batch_labels.append(int(sample['label']))
+            batch_type_match_labels.append(int(sample['e1_subtype_id'] == sample['e2_subtype_id']))
+            batch_arg_match_labels.append(int(sample['label']))
+            batch_e1_type_labels.append(int(sample['e1_subtype_id']))
+            batch_e2_type_labels.append(int(sample['e2_subtype_id']))
         batch_inputs = tokenizer(
             batch_sen, 
             max_length=args.max_seq_length, 
@@ -368,11 +371,6 @@ def get_dataLoader(args, dataset, tokenizer, prompt_type:str, verbalizer:dict, b
             truncation=True, 
             return_tensors="pt"
         )
-        batch_subtype1 = [event_type_ids[t] for t in batch_e1_type]
-        batch_subtype2 = [event_type_ids[t] for t in batch_e2_type]
-        batch_type_match = [match_id if match == 1 else mismatch_id for match in batch_type_match]
-        batch_arg_match = [match_id if match == 1 else mismatch_id for match in batch_arg_match]
-        batch_label = [pos_id if coref == 1 else neg_id  for coref in batch_coref]
         return {
             'batch_inputs': batch_inputs, 
             'batch_mask_idx': batch_mask_idx, 
@@ -381,11 +379,14 @@ def get_dataLoader(args, dataset, tokenizer, prompt_type:str, verbalizer:dict, b
             'batch_event_idx': batch_event_idx, 
             'batch_t1_mask_idx': batch_e1_type_mask_idx, 
             'batch_t2_mask_idx': batch_e2_type_mask_idx, 
-            'type_match': batch_type_match, 
-            'arg_match': batch_arg_match, 
-            'subtype1': batch_subtype1, 
-            'subtype2': batch_subtype2, 
-            'labels': batch_label
+            'label_word_id': [neg_id, pos_id], 
+            'match_label_word_id': [match_id, mismatch_id], 
+            'subtype_label_word_id': [event_type_ids[i] for i in range(len(EVENT_SUBTYPES) + 1)], 
+            'labels': batch_labels, 
+            'subtype_match_labels': batch_type_match_labels, 
+            'arg_match_labels': batch_arg_match_labels, 
+            'e1_subtype_labels': batch_e1_type_labels, 
+            'e2_subtype_labels': batch_e2_type_labels
         }
 
     if prompt_type.startswith('h') or prompt_type.startswith('s'): # base prompt

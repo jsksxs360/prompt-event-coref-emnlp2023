@@ -165,7 +165,6 @@ def predict(
         sentences, sentences_lengths, 
         prompt_type, args.model_type, tokenizer, args.max_seq_length
     )
-    pos_id, neg_id = verbalizer['coref']['id'], verbalizer['non-coref']['id']
     prompt_text = prompt_data['prompt']
     # convert char offsets to token idxs
     encoding = tokenizer(prompt_text)
@@ -185,7 +184,6 @@ def predict(
         e1_type_mask_idx, e2_type_mask_idx
     ]
     event_idx = [e1s_idx, e1e_idx, e2s_idx, e2e_idx]
-    
     inputs = tokenizer(
         prompt_text, 
         max_length=args.max_seq_length, 
@@ -193,17 +191,13 @@ def predict(
         truncation=True, 
         return_tensors="pt"
     )
-    event_type_ids = {
-        s_id: verbalizer[subtype]['id']
-        for s_id, subtype in id2subtype.items()
-    }
     inputs = {
         'batch_inputs': inputs, 
         'batch_mask_idx': [mask_idx], 
         'batch_event_idx': [event_idx], 
         'batch_t1_mask_idx': [e1_type_mask_idx], 
         'batch_t2_mask_idx': [e2_type_mask_idx], 
-        'label_word_id': [neg_id, pos_id], 
+        'label_word_id': [verbalizer['non-coref']['id'], verbalizer['coref']['id']], 
         'subtype_label_word_id': [
             verbalizer[id2subtype[s_id]]['id'] 
             for s_id in range(len(EVENT_SUBTYPES) + 1)
