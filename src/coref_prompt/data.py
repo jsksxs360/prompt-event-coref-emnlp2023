@@ -74,6 +74,7 @@ class KBPCoref(Dataset):
                             'mask_offset': prompt_data['mask_offset'], 
                             'type_match_mask_offset': prompt_data['type_match_mask_offset'], 
                             'arg_match_mask_offset': prompt_data['arg_match_mask_offset'], 
+                            'trigger_offsets': prompt_data['trigger_offsets'], 
                             'e1_id': event_1['start'], # event1
                             'e1_trigger': event_1['trigger'], 
                             'e1_subtype': event_1['subtype'] if event_1['subtype'] in EVENT_SUBTYPES else 'normal', 
@@ -162,6 +163,7 @@ class KBPCorefTiny(Dataset):
                                 'mask_offset': prompt_data['mask_offset'], 
                                 'type_match_mask_offset': prompt_data['type_match_mask_offset'], 
                                 'arg_match_mask_offset': prompt_data['arg_match_mask_offset'], 
+                                'trigger_offsets': prompt_data['trigger_offsets'], 
                                 'e1_id': event_1['start'], # event1
                                 'e1_trigger': event_1['trigger'], 
                                 'e1_subtype': event_1['subtype'] if event_1['subtype'] in EVENT_SUBTYPES else 'normal', 
@@ -206,6 +208,7 @@ class KBPCorefTiny(Dataset):
                                 'mask_offset': prompt_data['mask_offset'], 
                                 'type_match_mask_offset': prompt_data['type_match_mask_offset'], 
                                 'arg_match_mask_offset': prompt_data['arg_match_mask_offset'], 
+                                'trigger_offsets': prompt_data['trigger_offsets'], 
                                 'e1_id': event_1['start'], # event1
                                 'e1_trigger': event_1['trigger'], 
                                 'e1_subtype': event_1['subtype'] if event_1['subtype'] in EVENT_SUBTYPES else 'normal', 
