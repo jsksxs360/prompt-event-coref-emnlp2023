@@ -834,7 +834,6 @@ class RobertaForMixPrompt(RobertaPreTrainedModel):
             batch_mask_arg_match_mask_reps = batched_index_select(mask_sequence_output, 1, batch_arg_match_mask_idx.unsqueeze(-1)).squeeze(1)
             batch_mask_t1_mask_reps = batched_index_select(mask_sequence_output, 1, batch_t1_mask_idx.unsqueeze(-1)).squeeze(1)
             batch_mask_t2_mask_reps = batched_index_select(mask_sequence_output, 1, batch_t2_mask_idx.unsqueeze(-1)).squeeze(1)
-            aaaaaaaaaaaaaaaaaaaaaaaaaaaaa
         if self.matching_style != 'none':
             # extract events & matching
             batch_e1_idx, batch_e2_idx = [], []
@@ -850,14 +849,29 @@ class RobertaForMixPrompt(RobertaPreTrainedModel):
             batch_match_reps = self._matching_func(batch_event_1_reps, batch_event_2_reps)
             batch_mask_reps = self.coref_mapping(torch.cat([batch_mask_reps, batch_match_reps], dim=-1))
             batch_arg_match_mask_reps = self.arg_match_mapping(torch.cat([batch_arg_match_mask_reps, batch_match_reps], dim=-1))
+            if batch_mask_inputs is not None:
+                batch_mask_event_1_reps = self.span_extractor(mask_sequence_output, batch_e1_idx).squeeze(dim=1)
+                batch_mask_event_2_reps = self.span_extractor(mask_sequence_output, batch_e2_idx).squeeze(dim=1)
+                batch_mask_match_reps = self._matching_func(batch_mask_event_1_reps, batch_mask_event_2_reps)
+                batch_mask_mask_reps = self.coref_mapping(torch.cat([batch_mask_mask_reps, batch_mask_match_reps], dim=-1))
+                batch_mask_arg_match_mask_reps = self.arg_match_mapping(torch.cat([batch_mask_arg_match_mask_reps, batch_mask_match_reps], dim=-1))
             # subtype matching
             batch_subtype_match_reps = self._matching_func(batch_t1_mask_reps, batch_t2_mask_reps)
             batch_type_match_mask_reps = self.type_match_mapping(torch.cat([batch_type_match_mask_reps, batch_subtype_match_reps], dim=-1))
+            if batch_mask_inputs is not None:
+                batch_mask_subtype_match_reps = self._matching_func(batch_mask_t1_mask_reps, batch_mask_t2_mask_reps)
+                batch_mask_type_match_mask_reps = self.type_match_mapping(torch.cat([batch_mask_type_match_mask_reps, batch_mask_subtype_match_reps], dim=-1))
         coref_logits = self.lm_head(batch_mask_reps)[:, label_word_id]
         type_match_logits = self.lm_head(batch_type_match_mask_reps)[:, match_label_word_id]
         arg_match_logits = self.lm_head(batch_arg_match_mask_reps)[:, match_label_word_id]
         e1_type_logits = self.lm_head(batch_t1_mask_reps)[:, subtype_label_word_id]
         e2_type_logits = self.lm_head(batch_t2_mask_reps)[:, subtype_label_word_id]
+        if batch_mask_inputs is not None:
+            mask_coref_logits = self.lm_head(batch_mask_mask_reps)[:, label_word_id]
+            mask_type_match_logits = self.lm_head(batch_mask_type_match_mask_reps)[:, match_label_word_id]
+            mask_arg_match_logits = self.lm_head(batch_mask_arg_match_mask_reps)[:, match_label_word_id]
+            mask_e1_type_logits = self.lm_head(batch_mask_t1_mask_reps)[:, subtype_label_word_id]
+            mask_e2_type_logits = self.lm_head(batch_mask_t2_mask_reps)[:, subtype_label_word_id]
 
         loss = None
         if labels is not None:
@@ -866,6 +880,12 @@ class RobertaForMixPrompt(RobertaPreTrainedModel):
             match_loss = 0.5 * loss_fct(type_match_logits, subtype_match_labels) + 0.5 * loss_fct(arg_match_logits, arg_match_labels)
             subtype_loss = 0.5 * loss_fct(e1_type_logits, e1_subtype_labels) + 0.5 * loss_fct(e2_type_logits, e2_subtype_labels)
             loss = torch.log(1 + coref_loss) + torch.log(1 + match_loss) + torch.log(1 + subtype_loss)
+            if batch_mask_inputs is not None:
+                mask_coref_loss = loss_fct(mask_coref_logits, labels)
+                mask_match_loss = 0.5 * loss_fct(mask_type_match_logits, subtype_match_labels) + 0.5 * loss_fct(mask_arg_match_logits, arg_match_labels)
+                mask_subtype_loss = 0.5 * loss_fct(mask_e1_type_logits, e1_subtype_labels) + 0.5 * loss_fct(mask_e2_type_logits, e2_subtype_labels)
+                mask_loss = torch.log(1 + mask_coref_loss) + torch.log(1 + mask_match_loss) + torch.log(1 + mask_subtype_loss)
+                loss = 0.5 * loss + 0.5 * mask_loss
         return loss, coref_logits
 
 class LongformerForMixPrompt(LongformerPreTrainedModel):
@@ -926,7 +946,7 @@ class LongformerForMixPrompt(LongformerPreTrainedModel):
         batch_inputs, batch_mask_idx, batch_type_match_mask_idx, batch_arg_match_mask_idx, 
         batch_event_idx, batch_t1_mask_idx, batch_t2_mask_idx, 
         label_word_id, match_label_word_id, subtype_label_word_id, 
-        labels=None, subtype_match_labels=None, arg_match_labels=None, e1_subtype_labels=None, e2_subtype_labels=None
+        batch_mask_inputs=None, labels=None, subtype_match_labels=None, arg_match_labels=None, e1_subtype_labels=None, e2_subtype_labels=None
         ):
         # global attention on event tokens
         global_attention_mask = torch.zeros_like(batch_inputs['input_ids'])
@@ -934,6 +954,8 @@ class LongformerForMixPrompt(LongformerPreTrainedModel):
             global_attention_mask[b_idx][e1s:e1e+1] = 1
             global_attention_mask[b_idx][e2s:e2e+1] = 1
         batch_inputs['global_attention_mask'] = global_attention_mask
+        if batch_mask_inputs is not None:
+            batch_mask_inputs['global_attention_mask'] = global_attention_mask
         
         outputs = self.longformer(**batch_inputs)
         sequence_output = outputs.last_hidden_state
@@ -942,6 +964,14 @@ class LongformerForMixPrompt(LongformerPreTrainedModel):
         batch_arg_match_mask_reps = batched_index_select(sequence_output, 1, batch_arg_match_mask_idx.unsqueeze(-1)).squeeze(1)
         batch_t1_mask_reps = batched_index_select(sequence_output, 1, batch_t1_mask_idx.unsqueeze(-1)).squeeze(1)
         batch_t2_mask_reps = batched_index_select(sequence_output, 1, batch_t2_mask_idx.unsqueeze(-1)).squeeze(1)
+        if batch_mask_inputs is not None:
+            mask_outputs = self.longformer(**batch_mask_inputs)
+            mask_sequence_output = mask_outputs.last_hidden_state
+            batch_mask_mask_reps = batched_index_select(mask_sequence_output, 1, batch_mask_idx.unsqueeze(-1)).squeeze(1)
+            batch_mask_type_match_mask_reps = batched_index_select(mask_sequence_output, 1, batch_type_match_mask_idx.unsqueeze(-1)).squeeze(1)
+            batch_mask_arg_match_mask_reps = batched_index_select(mask_sequence_output, 1, batch_arg_match_mask_idx.unsqueeze(-1)).squeeze(1)
+            batch_mask_t1_mask_reps = batched_index_select(mask_sequence_output, 1, batch_t1_mask_idx.unsqueeze(-1)).squeeze(1)
+            batch_mask_t2_mask_reps = batched_index_select(mask_sequence_output, 1, batch_t2_mask_idx.unsqueeze(-1)).squeeze(1)
         if self.matching_style != 'none':
             # extract events & matching
             batch_e1_idx, batch_e2_idx = [], []
@@ -957,14 +987,29 @@ class LongformerForMixPrompt(LongformerPreTrainedModel):
             batch_match_reps = self._matching_func(batch_event_1_reps, batch_event_2_reps)
             batch_mask_reps = self.coref_mapping(torch.cat([batch_mask_reps, batch_match_reps], dim=-1))
             batch_arg_match_mask_reps = self.arg_match_mapping(torch.cat([batch_arg_match_mask_reps, batch_match_reps], dim=-1))
+            if batch_mask_inputs is not None:
+                batch_mask_event_1_reps = self.span_extractor(mask_sequence_output, batch_e1_idx).squeeze(dim=1)
+                batch_mask_event_2_reps = self.span_extractor(mask_sequence_output, batch_e2_idx).squeeze(dim=1)
+                batch_mask_match_reps = self._matching_func(batch_mask_event_1_reps, batch_mask_event_2_reps)
+                batch_mask_mask_reps = self.coref_mapping(torch.cat([batch_mask_mask_reps, batch_mask_match_reps], dim=-1))
+                batch_mask_arg_match_mask_reps = self.arg_match_mapping(torch.cat([batch_mask_arg_match_mask_reps, batch_mask_match_reps], dim=-1))
             # subtype matching
             batch_subtype_match_reps = self._matching_func(batch_t1_mask_reps, batch_t2_mask_reps)
             batch_type_match_mask_reps = self.type_match_mapping(torch.cat([batch_type_match_mask_reps, batch_subtype_match_reps], dim=-1))
+            if batch_mask_inputs is not None:
+                batch_mask_subtype_match_reps = self._matching_func(batch_mask_t1_mask_reps, batch_mask_t2_mask_reps)
+                batch_mask_type_match_mask_reps = self.type_match_mapping(torch.cat([batch_mask_type_match_mask_reps, batch_mask_subtype_match_reps], dim=-1))
         coref_logits = self.lm_head(batch_mask_reps)[:, label_word_id]
         type_match_logits = self.lm_head(batch_type_match_mask_reps)[:, match_label_word_id]
         arg_match_logits = self.lm_head(batch_arg_match_mask_reps)[:, match_label_word_id]
         e1_type_logits = self.lm_head(batch_t1_mask_reps)[:, subtype_label_word_id]
         e2_type_logits = self.lm_head(batch_t2_mask_reps)[:, subtype_label_word_id]
+        if batch_mask_inputs is not None:
+            mask_coref_logits = self.lm_head(batch_mask_mask_reps)[:, label_word_id]
+            mask_type_match_logits = self.lm_head(batch_mask_type_match_mask_reps)[:, match_label_word_id]
+            mask_arg_match_logits = self.lm_head(batch_mask_arg_match_mask_reps)[:, match_label_word_id]
+            mask_e1_type_logits = self.lm_head(batch_mask_t1_mask_reps)[:, subtype_label_word_id]
+            mask_e2_type_logits = self.lm_head(batch_mask_t2_mask_reps)[:, subtype_label_word_id]
 
         loss = None
         if labels is not None:
@@ -973,4 +1018,10 @@ class LongformerForMixPrompt(LongformerPreTrainedModel):
             match_loss = 0.5 * loss_fct(type_match_logits, subtype_match_labels) + 0.5 * loss_fct(arg_match_logits, arg_match_labels)
             subtype_loss = 0.5 * loss_fct(e1_type_logits, e1_subtype_labels) + 0.5 * loss_fct(e2_type_logits, e2_subtype_labels)
             loss = torch.log(1 + coref_loss) + torch.log(1 + match_loss) + torch.log(1 + subtype_loss)
+            if batch_mask_inputs is not None:
+                mask_coref_loss = loss_fct(mask_coref_logits, labels)
+                mask_match_loss = 0.5 * loss_fct(mask_type_match_logits, subtype_match_labels) + 0.5 * loss_fct(mask_arg_match_logits, arg_match_labels)
+                mask_subtype_loss = 0.5 * loss_fct(mask_e1_type_logits, e1_subtype_labels) + 0.5 * loss_fct(mask_e2_type_logits, e2_subtype_labels)
+                mask_loss = torch.log(1 + mask_coref_loss) + torch.log(1 + mask_match_loss) + torch.log(1 + mask_subtype_loss)
+                loss = 0.5 * loss + 0.5 * mask_loss
         return loss, coref_logits

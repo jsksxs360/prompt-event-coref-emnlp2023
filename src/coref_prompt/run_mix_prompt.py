@@ -31,7 +31,7 @@ MIX_PROMPT_MODELS = {
 def to_device(args, batch_data):
     new_batch_data = {}
     for k, v in batch_data.items():
-        if k == 'batch_inputs':
+        if k in ['batch_inputs', 'batch_mask_inputs']:
             new_batch_data[k] = {
                 k_: v_.to(args.device) for k_, v_ in v.items()
             }
@@ -79,7 +79,7 @@ def train(args, train_dataset, dev_dataset, model, tokenizer, prompt_type, verba
     # Set seed
     seed_everything(args.seed)
     train_dataloader = get_dataLoader(args, train_dataset, tokenizer, prompt_type, verbalizer, shuffle=True)
-    dev_dataloader = get_dataLoader(args, dev_dataset, tokenizer, prompt_type, verbalizer, shuffle=False)
+    dev_dataloader = get_dataLoader(args, dev_dataset, tokenizer, prompt_type, verbalizer, with_mask=False, shuffle=False)
     t_total = len(train_dataloader) * args.num_train_epochs
     # Prepare optimizer and schedule (linear warmup and decay)
     no_decay = ["bias", "LayerNorm.weight"]
@@ -126,7 +126,7 @@ def train(args, train_dataset, dev_dataset, model, tokenizer, prompt_type, verba
     logger.info("Done!")
 
 def test(args, test_dataset, model, tokenizer, save_weights:list, prompt_type, verbalizer):
-    test_dataloader = get_dataLoader(args, test_dataset, tokenizer, prompt_type=prompt_type, verbalizer=verbalizer, shuffle=False)
+    test_dataloader = get_dataLoader(args, test_dataset, tokenizer, prompt_type=prompt_type, verbalizer=verbalizer, with_mask=False, shuffle=False)
     logger.info('***** Running testing *****')
     for save_weight in save_weights:
         logger.info(f'loading {save_weight}...')

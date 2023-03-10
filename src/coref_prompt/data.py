@@ -233,7 +233,7 @@ class KBPCorefTiny(Dataset):
     def __getitem__(self, idx):
         return self.data[idx]
 
-def get_dataLoader(args, dataset, tokenizer, prompt_type:str, verbalizer:dict, with_mask_input:bool=False, batch_size:int=None, shuffle:bool=False):
+def get_dataLoader(args, dataset, tokenizer, prompt_type:str, verbalizer:dict, with_mask:bool=None, batch_size:int=None, shuffle:bool=False):
     assert prompt_type in PROMPT_TYPE
     pos_id, neg_id = verbalizer['coref']['id'], verbalizer['non-coref']['id']
     if prompt_type.startswith('m'):
@@ -594,6 +594,7 @@ def get_dataLoader(args, dataset, tokenizer, prompt_type:str, verbalizer:dict, w
             'e2_subtype_labels': batch_e2_type_labels
         }
 
+    with_mask_input = with_mask if with_mask else args.with_mask
     if prompt_type.startswith('h') or prompt_type.startswith('s'): # base prompt
         select_collote_fn = collote_fn_with_mask if with_mask_input else collote_fn
     elif prompt_type.startswith('t'): # knowledge prompt
