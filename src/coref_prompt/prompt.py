@@ -5,8 +5,10 @@ PROMPT_TYPE = [
     'sn', 'sc', 'sq', # (hard/soft normal/connect/question)
     't_hn', 't_hc', 't_hq', 'ta_hn', 'ta_hc', 'ta_hq', # knowledge enhanced prompts 
     't_sn', 't_sc', 't_sq', 'ta_sn', 'ta_sc', 'ta_sq', # (subtype/subtype-argument)
-    'm_ht_hn', 'm_ht_hc', 'm_ht_hq', 'm_hta_hn', 'm_hta_hc', 'm_hta_hq', # mix prompts
-    'm_st_hn', 'm_st_hc', 'm_st_hq', 'm_sta_hn', 'm_sta_hc', 'm_sta_hq'  # (hard/soft subtype/argument/subtype-argument)
+    'm_ht_hn', 'm_ht_hc', 'm_ht_hq', 'm_ht_sn', 'm_ht_sc', 'm_ht_sq', # mix prompts
+    'm_hta_hn', 'm_hta_hc', 'm_hta_hq', 'm_hta_sn', 'm_hta_sc', 'm_hta_sq', 
+    'm_st_hn', 'm_st_hc', 'm_st_hq', 'm_st_sn', 'm_st_sc', 'm_st_sq', 
+    'm_sta_hn', 'm_sta_hc', 'm_sta_hq', 'm_sta_sn', 'm_sta_sc', 'm_sta_sq' # (hard/soft subtype/subtype-argument)
 ]
 
 EVENT_SUBTYPES = [ # 18 subtypes
@@ -453,31 +455,81 @@ def create_mix_template(e1_trigger:str, e2_trigger:str, e1_arg_str: str, e2_arg_
     else:
         raise ValueError(f'Unknown prompt type: {prompt_type}')
     infer_trigger_offsets = []
-    if inference_temp_type == 'hn': 
-        infer_template = f"In conclusion, the events expressed by {s_tokens['e1s']} "
-        infer_trigger_offsets.append([len(infer_template), len(infer_template) + len(e1_trigger) - 1])
-        infer_template += f"{e1_trigger} {s_tokens['e1e']} and {s_tokens['e2s']} "
-        infer_trigger_offsets.append([len(infer_template), len(infer_template) + len(e2_trigger) - 1])
-        infer_template += f"{e2_trigger} {s_tokens['e2e']} "
-        infer_template += f"have {s_tokens['mask']} event type and {s_tokens['mask']} participants, so they refer to {s_tokens['mask']} event."
-    elif inference_temp_type == 'hc': 
-        infer_template = f"In conclusion, the events expressed by {s_tokens['e1s']} "
-        infer_trigger_offsets.append([len(infer_template), len(infer_template) + len(e1_trigger) - 1])
-        infer_template += f"{e1_trigger} {s_tokens['e1e']} and {s_tokens['e2s']} "
-        infer_trigger_offsets.append([len(infer_template), len(infer_template) + len(e2_trigger) - 1])
-        infer_template += f"{e2_trigger} {s_tokens['e2e']} "
-        infer_template += f"have {s_tokens['mask']} event type and {s_tokens['mask']} participants. Therefore, the event expressed by {s_tokens['e1s']} "
-        infer_trigger_offsets.append([len(infer_template), len(infer_template) + len(e1_trigger) - 1])
-        infer_template += f"{e1_trigger} {s_tokens['e1e']} {s_tokens['mask']} the event expressed by {s_tokens['e2s']} "
-        infer_trigger_offsets.append([len(infer_template), len(infer_template) + len(e2_trigger) - 1])
-        infer_template += f"{e2_trigger} {s_tokens['e2e']}."
-    elif inference_temp_type == 'hq': 
-        infer_template = f"In conclusion, the events expressed by {s_tokens['e1s']} "
-        infer_trigger_offsets.append([len(infer_template), len(infer_template) + len(e1_trigger) - 1])
-        infer_template += f"{e1_trigger} {s_tokens['e1e']} and {s_tokens['e2s']} "
-        infer_trigger_offsets.append([len(infer_template), len(infer_template) + len(e2_trigger) - 1])
-        infer_template += f"{e2_trigger} {s_tokens['e2e']} "
-        infer_template += f"have {s_tokens['mask']} event type and {s_tokens['mask']} participants. So do they refer to the same event? {s_tokens['mask']}."
+    if inference_temp_type.startswith('h'): # hard template
+        if inference_temp_type == 'hn': 
+            infer_template = f"In conclusion, the events expressed by {s_tokens['e1s']} "
+            infer_trigger_offsets.append([len(infer_template), len(infer_template) + len(e1_trigger) - 1])
+            infer_template += f"{e1_trigger} {s_tokens['e1e']} and {s_tokens['e2s']} "
+            infer_trigger_offsets.append([len(infer_template), len(infer_template) + len(e2_trigger) - 1])
+            infer_template += f"{e2_trigger} {s_tokens['e2e']} "
+            infer_template += f"have {s_tokens['mask']} event type and {s_tokens['mask']} participants. "
+            infer_template += f"So the events expressed by {s_tokens['e1s']} "
+            infer_trigger_offsets.append([len(infer_template), len(infer_template) + len(e1_trigger) - 1])
+            infer_template += f"{e1_trigger} {s_tokens['e1e']} and {s_tokens['e2s']} "
+            infer_trigger_offsets.append([len(infer_template), len(infer_template) + len(e2_trigger) - 1])
+            infer_template += f"{e2_trigger} {s_tokens['e2e']} refer to {s_tokens['mask']} event."
+        elif inference_temp_type == 'hc': 
+            infer_template = f"In conclusion, the events expressed by {s_tokens['e1s']} "
+            infer_trigger_offsets.append([len(infer_template), len(infer_template) + len(e1_trigger) - 1])
+            infer_template += f"{e1_trigger} {s_tokens['e1e']} and {s_tokens['e2s']} "
+            infer_trigger_offsets.append([len(infer_template), len(infer_template) + len(e2_trigger) - 1])
+            infer_template += f"{e2_trigger} {s_tokens['e2e']} "
+            infer_template += f"have {s_tokens['mask']} event type and {s_tokens['mask']} participants. "
+            infer_template += f"So the event expressed by {s_tokens['e1s']} "
+            infer_trigger_offsets.append([len(infer_template), len(infer_template) + len(e1_trigger) - 1])
+            infer_template += f"{e1_trigger} {s_tokens['e1e']} {s_tokens['mask']} the event expressed by {s_tokens['e2s']} "
+            infer_trigger_offsets.append([len(infer_template), len(infer_template) + len(e2_trigger) - 1])
+            infer_template += f"{e2_trigger} {s_tokens['e2e']}."
+        elif inference_temp_type == 'hq': 
+            infer_template = f"In conclusion, the events expressed by {s_tokens['e1s']} "
+            infer_trigger_offsets.append([len(infer_template), len(infer_template) + len(e1_trigger) - 1])
+            infer_template += f"{e1_trigger} {s_tokens['e1e']} and {s_tokens['e2s']} "
+            infer_trigger_offsets.append([len(infer_template), len(infer_template) + len(e2_trigger) - 1])
+            infer_template += f"{e2_trigger} {s_tokens['e2e']} "
+            infer_template += f"have {s_tokens['mask']} event type and {s_tokens['mask']} participants. "
+            infer_template += f"So do events expressed by {s_tokens['e1s']} "
+            infer_trigger_offsets.append([len(infer_template), len(infer_template) + len(e1_trigger) - 1])
+            infer_template += f"{e1_trigger} {s_tokens['e1e']} and {s_tokens['e2s']} "
+            infer_trigger_offsets.append([len(infer_template), len(infer_template) + len(e2_trigger) - 1])
+            infer_template += f"{e2_trigger} {s_tokens['e2e']} refer to the same event? {s_tokens['mask']}."
+    elif inference_temp_type.startswith('s'): # soft template
+        if inference_temp_type == 'sn':
+            infer_template = f"In conclusion, the events expressed by {s_tokens['e1s']} "
+            infer_trigger_offsets.append([len(infer_template), len(infer_template) + len(e1_trigger) - 1])
+            infer_template += f"{e1_trigger} {s_tokens['e1e']} and {s_tokens['e2s']} "
+            infer_trigger_offsets.append([len(infer_template), len(infer_template) + len(e2_trigger) - 1])
+            infer_template += f"{e2_trigger} {s_tokens['e2e']} "
+            infer_template += f"have {s_tokens['mask']} event type and {s_tokens['mask']} participants. "
+            infer_template += f"So {s_tokens['l1']} {s_tokens['e1s']} "
+            infer_trigger_offsets.append([len(infer_template), len(infer_template) + len(e1_trigger) - 1])
+            infer_template += f"{e1_trigger} {s_tokens['e1e']} {s_tokens['l2']} {s_tokens['l3']} {s_tokens['e2s']} "
+            infer_trigger_offsets.append([len(infer_template), len(infer_template) + len(e2_trigger) - 1])
+            infer_template += f"{e2_trigger} {s_tokens['e2e']} {s_tokens['l4']} {s_tokens['l5']} {s_tokens['mask']} {s_tokens['l6']}."
+        elif inference_temp_type == 'sc':
+            infer_template = f"In conclusion, the events expressed by {s_tokens['e1s']} "
+            infer_trigger_offsets.append([len(infer_template), len(infer_template) + len(e1_trigger) - 1])
+            infer_template += f"{e1_trigger} {s_tokens['e1e']} and {s_tokens['e2s']} "
+            infer_trigger_offsets.append([len(infer_template), len(infer_template) + len(e2_trigger) - 1])
+            infer_template += f"{e2_trigger} {s_tokens['e2e']} "
+            infer_template += f"have {s_tokens['mask']} event type and {s_tokens['mask']} participants. "
+            infer_template += f"So {s_tokens['l1']} {s_tokens['e1s']} "
+            infer_trigger_offsets.append([len(infer_template), len(infer_template) + len(e1_trigger) - 1])
+            infer_template += f"{e1_trigger} {s_tokens['e1e']} {s_tokens['l2']} "
+            infer_template += f"{s_tokens['l5']} {s_tokens['mask']} {s_tokens['l6']} {s_tokens['l3']} {s_tokens['e2s']} "
+            infer_trigger_offsets.append([len(infer_template), len(infer_template) + len(e2_trigger) - 1])
+            infer_template += f"{e2_trigger} {s_tokens['e2e']} {s_tokens['l4']}."
+        elif inference_temp_type == 'sq':
+            infer_template = f"In conclusion, the events expressed by {s_tokens['e1s']} "
+            infer_trigger_offsets.append([len(infer_template), len(infer_template) + len(e1_trigger) - 1])
+            infer_template += f"{e1_trigger} {s_tokens['e1e']} and {s_tokens['e2s']} "
+            infer_trigger_offsets.append([len(infer_template), len(infer_template) + len(e2_trigger) - 1])
+            infer_template += f"{e2_trigger} {s_tokens['e2e']} "
+            infer_template += f"have {s_tokens['mask']} event type and {s_tokens['mask']} participants. "
+            infer_template += f"So {s_tokens['l1']} {s_tokens['e1s']} "
+            infer_trigger_offsets.append([len(infer_template), len(infer_template) + len(e1_trigger) - 1])
+            infer_template += f"{e1_trigger} {s_tokens['e1e']} {s_tokens['l2']} {s_tokens['l3']} {s_tokens['e2s']} "
+            infer_trigger_offsets.append([len(infer_template), len(infer_template) + len(e2_trigger) - 1])
+            infer_template += f"{e2_trigger} {s_tokens['e2e']} {s_tokens['l4']}? {s_tokens['mask']}."
     special_tokens = [
         s_tokens['e1s'], s_tokens['e1e'], s_tokens['e2s'], s_tokens['e2e']
     ] if 'h' in anchor_temp_type else [
