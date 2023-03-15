@@ -463,7 +463,7 @@ def create_mix_template(e1_trigger:str, e2_trigger:str, e1_arg_str: str, e2_arg_
             infer_trigger_offsets.append([len(infer_template), len(infer_template) + len(e2_trigger) - 1])
             infer_template += f"{e2_trigger} {s_tokens['e2e']} "
             infer_template += f"have {s_tokens['mask']} event type and {s_tokens['mask']} participants. "
-            infer_template += f"So the events expressed by {s_tokens['e1s']} "
+            infer_template += f"So events expressed by {s_tokens['e1s']} "
             infer_trigger_offsets.append([len(infer_template), len(infer_template) + len(e1_trigger) - 1])
             infer_template += f"{e1_trigger} {s_tokens['e1e']} and {s_tokens['e2s']} "
             infer_trigger_offsets.append([len(infer_template), len(infer_template) + len(e2_trigger) - 1])
