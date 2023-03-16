@@ -231,30 +231,49 @@ if __name__ == '__main__':
         logger.info(f'loading weights from {best_save_weight}...')
         model.load_state_dict(torch.load(os.path.join(args.output_dir, best_save_weight)), strict=False)
         logger.info(f'calculating event cosine similarity of {best_save_weight}...')
-        results = []
         model.eval()
-        with open(args.train_file, 'rt' , encoding='utf-8') as f_in:
+        for data_file in [args.train_file, args.dev_file, args.test_file]:
+            results = []
+            with open(data_file, 'rt' , encoding='utf-8') as f_in:
+                for line in tqdm(f_in.readlines()):
+                    sample = json.loads(line.strip())
+                    events = [
+                        [event['event_id'], event['start'], event['start'] + len(event['trigger']) - 1] 
+                        for event in sample['events']
+                    ]
+                    new_events, event_id_pairs, event_pair_cos = predict(args, sample['doc_id'], sample['document'], events, model, tokenizer)
+                    sample['events'] = [e for e in sample['events'] if e['event_id'] in new_events]
+                    cluster_list = []
+                    for cluster in sample['clusters']:
+                        events = [e_id for e_id in cluster['events'] if e_id in new_events]
+                        if len(events) > 0:
+                            cluster_list.append({
+                                'hopper_id': cluster['hopper_id'], 
+                                'events': events
+                            })
+                    sample['clusters'] = cluster_list
+                    sample['event_pairs_id'] = event_id_pairs
+                    sample['event_pairs_cos'] = event_pair_cos
+                    results.append(sample)
+            save_name = re.sub('\.json', '', os.path.split(data_file)[1]) + '_with_cos.json'
+            with open(os.path.join(args.output_dir, save_name), 'wt', encoding='utf-8') as f:
+                for exapmle_result in results:
+                    f.write(json.dumps(exapmle_result) + '\n')
+        data_file, results = args.pred_test_file, []
+        with open(data_file, 'rt' , encoding='utf-8') as f_in:
             for line in tqdm(f_in.readlines()):
                 sample = json.loads(line.strip())
                 events = [
-                    [event['event_id'], event['start'], event['start'] + len(event['trigger']) - 1] 
-                    for event in sample['events']
+                    [f"e-{event['start']}", event['start'], event['start'] + len(event['trigger']) - 1] 
+                    for event in sample['pred_label']
                 ]
                 new_events, event_id_pairs, event_pair_cos = predict(args, sample['doc_id'], sample['document'], events, model, tokenizer)
-                sample['events'] = [e for e in sample['events'] if e['event_id'] in new_events]
-                cluster_list = []
-                for cluster in sample['clusters']:
-                    events = [e_id for e_id in cluster['events'] if e_id in new_events]
-                    if len(events) > 0:
-                        cluster_list.append({
-                            'hopper_id': cluster['hopper_id'], 
-                            'events': events
-                        })
-                sample['clusters'] = cluster_list
+                sample['events'] = [e for e in sample['pred_label'] if f"e-{e['start']}" in new_events]
+                del sample['pred_label']
                 sample['event_pairs_id'] = event_id_pairs
                 sample['event_pairs_cos'] = event_pair_cos
                 results.append(sample)
-        save_name = re.sub('\.json', '', os.path.split(args.train_file)[1]) + '_with_cos.json'
+        save_name = re.sub('\.json', '', os.path.split(data_file)[1]) + '_with_cos.json'
         with open(os.path.join(args.output_dir, save_name), 'wt', encoding='utf-8') as f:
             for exapmle_result in results:
                 f.write(json.dumps(exapmle_result) + '\n')

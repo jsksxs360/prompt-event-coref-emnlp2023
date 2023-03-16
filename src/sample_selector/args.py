@@ -10,6 +10,7 @@ def parse_args():
     parser.add_argument("--train_file", default=None, type=str, required=True, help="The input training file.")
     parser.add_argument("--dev_file", default=None, type=str, required=True, help="The input evaluation file.")
     parser.add_argument("--test_file", default=None, type=str, required=True, help="The input testing file.")
+    parser.add_argument("--pred_test_file", default=None, type=str, required=True, help="The input predicted testing event file.")
 
     parser.add_argument("--model_type",
         default="longformer", type=str, required=True
