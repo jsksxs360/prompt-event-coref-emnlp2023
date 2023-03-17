@@ -5,30 +5,31 @@ from collections import defaultdict
 from prompt import PROMPT_TYPE, EVENT_SUBTYPES, subtype2id, id2subtype
 from prompt import create_prompt
 
-def get_pred_arguments(arg_file:str) -> dict:
+def get_pred_related_info(simi_file:str) -> dict:
     '''
-    # Returns: 
-        - argument dictionary: {doc_id: {event_id: [{"global_offset": 798, "mention": "We", "role": "participant"}]}}
+    # Returns:
+        - related info dictionary: {doc_id: {event_offset: {
+            'arguments': [{"global_offset": 798, "mention": "We", "role": "participant"}]
+            'related_triggers': ['charged'], 
+            'related_arguments': [
+                {'global_offset': 1408, 'mention': 'Garvina', 'role': 'participant'}, 
+                {'global_offset': 1368, 'mention': 'Prosecutors', 'role': 'participant'}
+            ]
+        }}}
     '''
-    participant_roles = set(['defendant', 'entity', 'person', 'position', 'agent', 'attacker', 
-                             'giver', 'victim', 'audience', 'recipient', 'target', 'seller', 
-                             'beneficiary', 'plaintiff', 'adjudicator', 'org', 'prosecutor'])
-    place_roles = set(['place', 'destination', 'origin'])
-    arg_dict = {}
-    with open(arg_file, 'rt', encoding='utf-8') as f:
+    related_info_dict = {}
+    with open(simi_file, 'rt', encoding='utf-8') as f:
         for line in f:
             sample = json.loads(line.strip())
-            arg_dict[sample['doc_id']] = {
-                event['start']: [
-                    {
-                        'global_offset': arg['start'], 
-                        'mention': arg['mention'], 
-                        'role': 'participant' if arg['role'].lower() in participant_roles else 'place'
-                    } for arg in event['arguments'] if arg['role'].lower() in participant_roles | place_roles
-                ] 
-                for event in sample['event_args']
+            related_info_dict[sample['doc_id']] = {
+                int(offset): {
+                    'arguments': related_info['arguments'], 
+                    'related_triggers': related_info['related_info'], 
+                    'related_arguments': related_info['related_arguments']
+                }
+                for offset, related_info in sample['relate_info'].items()
             }
-    return arg_dict
+    return related_info_dict
 
 def get_event_cluster_id(event_id:str, clusters:list) -> str:
     for cluster in clusters:
@@ -37,12 +38,12 @@ def get_event_cluster_id(event_id:str, clusters:list) -> str:
     raise ValueError(f'Unknown event_id: {event_id}')
 
 class KBPCoref(Dataset):
-    def __init__(self, data_file:str, arg_file:str, prompt_type:str, model_type:str, tokenizer, max_length:int):
+    def __init__(self, data_file:str, simi_file:str, prompt_type:str, model_type:str, tokenizer, max_length:int):
         assert prompt_type in PROMPT_TYPE and model_type in ['bert', 'roberta', 'longformer']
         self.model_type = model_type
         self.tokenizer = tokenizer
         self.max_length = max_length
-        self.arg_dict = get_pred_arguments(arg_file)
+        self.related_dict = get_pred_related_info(simi_file)
         self.data = self.load_data(data_file, prompt_type)
     
     def load_data(self, data_file, prompt_type:str):
@@ -60,11 +61,11 @@ class KBPCoref(Dataset):
                         event_1, event_2 = events[i], events[j]
                         event_1_cluster_id = get_event_cluster_id(event_1['event_id'], clusters)
                         event_2_cluster_id = get_event_cluster_id(event_2['event_id'], clusters)
-                        event_1_args = self.arg_dict[sample['doc_id']][event_1['start']]
-                        event_2_args = self.arg_dict[sample['doc_id']][event_2['start']]
+                        event_1_related_info = self.related_dict[sample['doc_id']][event_1['start']]
+                        event_2_related_info = self.related_dict[sample['doc_id']][event_2['start']]
                         prompt_data = create_prompt(
-                            event_1['sent_idx'], event_1['sent_start'], event_1['trigger'], event_1_args, 
-                            event_2['sent_idx'], event_2['sent_start'], event_2['trigger'], event_2_args, 
+                            event_1['sent_idx'], event_1['sent_start'], event_1['trigger'], event_1_related_info, 
+                            event_2['sent_idx'], event_2['sent_start'], event_2['trigger'], event_2_related_info, 
                             sentences, sentences_lengths, 
                             prompt_type, self.model_type, self.tokenizer, self.max_length
                         )
@@ -120,7 +121,7 @@ def get_noncoref_ids(simi_list, top_k):
     return noncoref_ids
 
 class KBPCorefTiny(Dataset):
-    def __init__(self, data_file:str, data_file_with_cos:str, arg_file:str, neg_top_k:int, prompt_type:str, model_type:str, tokenizer, max_length:int):
+    def __init__(self, data_file:str, data_file_with_cos:str, simi_file:str, neg_top_k:int, prompt_type:str, model_type:str, tokenizer, max_length:int):
         '''
         - data_file: source train data file
         - data_file_with_cos: train data file with event similarities
@@ -130,7 +131,7 @@ class KBPCorefTiny(Dataset):
         self.model_type = model_type
         self.tokenizer = tokenizer
         self.max_length = max_length
-        self.arg_dict = get_pred_arguments(arg_file)
+        self.related_dict = get_pred_related_info(simi_file)
         self.data = self.load_data(data_file, data_file_with_cos, neg_top_k, prompt_type)
     
     def load_data(self, data_file, data_file_with_cos, neg_top_k, prompt_type:str):
@@ -148,12 +149,12 @@ class KBPCorefTiny(Dataset):
                         event_1, event_2 = events[i], events[j]
                         event_1_cluster_id = get_event_cluster_id(event_1['event_id'], clusters)
                         event_2_cluster_id = get_event_cluster_id(event_2['event_id'], clusters)
-                        event_1_args = self.arg_dict[sample['doc_id']][event_1['start']]
-                        event_2_args = self.arg_dict[sample['doc_id']][event_2['start']]
+                        event_1_related_info = self.related_dict[sample['doc_id']][event_1['start']]
+                        event_2_related_info = self.related_dict[sample['doc_id']][event_2['start']]
                         if event_1_cluster_id == event_2_cluster_id:
                             prompt_data = create_prompt(
-                                event_1['sent_idx'], event_1['sent_start'], event_1['trigger'], event_1_args, 
-                                event_2['sent_idx'], event_2['sent_start'], event_2['trigger'], event_2_args, 
+                                event_1['sent_idx'], event_1['sent_start'], event_1['trigger'], event_1_related_info, 
+                                event_2['sent_idx'], event_2['sent_start'], event_2['trigger'], event_2_related_info, 
                                 sentences, sentences_lengths, 
                                 prompt_type, self.model_type, self.tokenizer, self.max_length
                             )
@@ -194,11 +195,11 @@ class KBPCorefTiny(Dataset):
                     for e_id in noncoref_event_ids: # non-coref
                         event_2 = events_dict[e_id]
                         if event_1['start'] < event_2['start']:
-                            event_1_args = self.arg_dict[sample['doc_id']][event_1['start']]
-                            event_2_args = self.arg_dict[sample['doc_id']][event_2['start']]
+                            event_1_related_info = self.related_dict[sample['doc_id']][event_1['start']]
+                            event_2_related_info = self.related_dict[sample['doc_id']][event_2['start']]
                             prompt_data = create_prompt(
-                                event_1['sent_idx'], event_1['sent_start'], event_1['trigger'], event_1_args, 
-                                event_2['sent_idx'], event_2['sent_start'], event_2['trigger'], event_2_args, 
+                                event_1['sent_idx'], event_1['sent_start'], event_1['trigger'], event_1_related_info, 
+                                event_2['sent_idx'], event_2['sent_start'], event_2['trigger'], event_2_related_info, 
                                 sentences, sentences_lengths, 
                                 prompt_type, self.model_type, self.tokenizer, self.max_length
                             )

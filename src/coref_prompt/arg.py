@@ -10,11 +10,11 @@ def parse_args():
     parser.add_argument("--train_file_with_cos", default=None, type=str, required=False, help="Input training file with similarities.")
     parser.add_argument("--dev_file", default=None, type=str, required=True, help="The input evaluation file.")
     parser.add_argument("--test_file", default=None, type=str, required=True, help="The input testing file.")
-    # extracted argument by omni
-    parser.add_argument("--train_argument_file", default=None, type=str, required=True, help="The input recognized argument file.")
-    parser.add_argument("--dev_argument_file", default=None, type=str, required=True, help="The input recognized argument file.")
-    parser.add_argument("--test_argument_file", default=None, type=str, required=True, help="The input recognized argument file.")
-    parser.add_argument("--pred_test_argument_file", default=None, type=str, required=True, help="The input recognized argument file.")
+    # matched similar triggers and extracted arguments
+    parser.add_argument("--train_simi_file", default=None, type=str, required=True, help="The input related info file.")
+    parser.add_argument("--dev_simi_file", default=None, type=str, required=True, help="The input related info file.")
+    parser.add_argument("--test_simi_file", default=None, type=str, required=True, help="The input related info file.")
+    parser.add_argument("--pred_test_simi_file", default=None, type=str, required=True, help="The input related info file.")
     # using normal/tiny dataset
     parser.add_argument("--train_data_type", default="tiny", type=str, required=True, choices=['normal', 'tiny'])
     parser.add_argument("--neg_top_k", default="1", type=int, help="select top k non-coref events for each event")
