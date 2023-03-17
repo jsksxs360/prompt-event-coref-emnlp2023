@@ -26,7 +26,7 @@ def get_pred_arguments(arg_file:str) -> dict:
             }
     return arg_dict
 
-def create_event_simi_dict(simi_file, cosine_threshold=0.5):
+def create_event_simi_dict(simi_file, cosine_threshold):
     doc_simi_dict = {}
     with open(simi_file, 'rt', encoding='utf-8') as f:
         for line in f:
@@ -50,9 +50,9 @@ def get_event_by_id(event_id, events):
             return e
     return None
 
-def create_simi_event_file(data_file, arg_file, simi_file, save_file):
+def create_simi_event_file(data_file, arg_file, simi_file, save_file, cosine_threshold=0.5):
     doc_arg_dict = get_pred_arguments(arg_file)
-    doc_simi_dict = create_event_simi_dict(simi_file)
+    doc_simi_dict = create_event_simi_dict(simi_file, cosine_threshold)
     Results = []
     with open(data_file, 'rt', encoding='utf-8') as f:
         for line in f:
@@ -62,15 +62,17 @@ def create_simi_event_file(data_file, arg_file, simi_file, save_file):
             events = sample['events']
             for e in events:
                 if e['event_id'] in simi_dict:
-                    triggers, args = set(), []
+                    triggers, trigger_offsets, args = set(), [], []
                     for related_e in simi_dict[e['event_id']]:
                         r_e = get_event_by_id(related_e['id'], events)
                         triggers.add(r_e['trigger'])
+                        trigger_offsets.append(r_e['start'])
                         args += arg_dict[r_e['start']]
                     simi_info[e['start']] = {
                         'trigger': e['trigger'], 
                         'arguments': arg_dict[e['start']], 
                         'related_triggers': list(triggers), 
+                        'related_trigger_offsets': trigger_offsets, 
                         'related_arguments': args
                     }
                 else:
@@ -78,6 +80,7 @@ def create_simi_event_file(data_file, arg_file, simi_file, save_file):
                         'trigger': e['trigger'], 
                         'arguments': arg_dict[e['start']], 
                         'related_triggers': [], 
+                        'related_trigger_offsets': [], 
                         'related_arguments': []
                     }
             Results.append({
@@ -94,9 +97,9 @@ def get_event_by_id_for_testfile(event_id, events):
             return e
     return None
 
-def create_simi_event_file_for_testfile(data_file, arg_file, simi_file, save_file):
+def create_simi_event_file_for_testfile(data_file, arg_file, simi_file, save_file, cosine_threshold=0.5):
     doc_arg_dict = get_pred_arguments(arg_file)
-    doc_simi_dict = create_event_simi_dict(simi_file)
+    doc_simi_dict = create_event_simi_dict(simi_file, cosine_threshold)
     Results = []
     with open(data_file, 'rt', encoding='utf-8') as f:
         for line in f:
@@ -106,15 +109,17 @@ def create_simi_event_file_for_testfile(data_file, arg_file, simi_file, save_fil
             events = sample['pred_label']
             for e in events:
                 if f"e-{e['start']}" in simi_dict:
-                    triggers, args = set(), []
+                    triggers, trigger_offsets, args = set(), [], []
                     for related_e in simi_dict[f"e-{e['start']}"]:
                         r_e = get_event_by_id_for_testfile(related_e['id'], events)
                         triggers.add(r_e['trigger'])
+                        trigger_offsets.append(r_e['start'])
                         args += arg_dict[r_e['start']]
                     simi_info[e['start']] = {
                         'trigger': e['trigger'], 
                         'arguments': arg_dict[e['start']], 
                         'related_triggers': list(triggers), 
+                        'related_trigger_offsets': trigger_offsets, 
                         'related_arguments': args
                     }
                 else:
@@ -122,6 +127,7 @@ def create_simi_event_file_for_testfile(data_file, arg_file, simi_file, save_fil
                         'trigger': e['trigger'], 
                         'arguments': arg_dict[e['start']], 
                         'related_triggers': [], 
+                        'related_trigger_offsets': [], 
                         'related_arguments': []
                     }
             Results.append({
@@ -132,11 +138,60 @@ def create_simi_event_file_for_testfile(data_file, arg_file, simi_file, save_fil
         for example_result in Results:
             f.write(json.dumps(example_result) + '\n')
 
-# create_simi_event_file('../train_filtered.json', 'omni_train_pred_args.json', '../train_filtered_with_cos.json', 'simi_train_related_info.json')
-# create_simi_event_file('../dev_filtered.json', 'omni_dev_pred_args.json', '../dev_filtered_with_cos.json', 'simi_dev_related_info.json')
-# create_simi_event_file('../test_filtered.json', 'omni_gold_test_pred_args.json', '../test_filtered_with_cos.json', 'simi_gold_test_related_info.json')
-# create_simi_event_file_for_testfile('../epoch_3_test_pred_events.json', 'omni_epoch_3_test_pred_args.json', '../epoch_3_test_pred_events_with_cos.json', 'simi_epoch_3_test_related_info.json')
+# create_simi_event_file(
+#     '../train_filtered.json', 
+#     'omni_train_pred_args.json', 
+#     '../train_filtered_with_cos.json', 
+#     'simi_train_related_info.json'
+# )
+# create_simi_event_file(
+#     '../dev_filtered.json', 
+#     'omni_dev_pred_args.json', 
+#     '../dev_filtered_with_cos.json', 
+#     'simi_dev_related_info.json'
+# )
+# create_simi_event_file(
+#     '../test_filtered.json', 
+#     'omni_gold_test_pred_args.json', 
+#     '../test_filtered_with_cos.json', 
+#     'simi_gold_test_related_info.json'
+# )
+# create_simi_event_file_for_testfile(
+#     '../epoch_3_test_pred_events.json', 
+#     'omni_epoch_3_test_pred_args.json', 
+#     '../epoch_3_test_pred_events_with_cos.json', 
+#     'simi_epoch_3_test_related_info.json'
+# )
 
+def analysis(simi_file, use_filter=True):
+    word_filter = set([
+        'i', 'me', 'you', 'he', 'him', 'she', 'her', 'it', 'we', 'us', 'you', 'they', 'them', 'my', 'mine', 'your', 'yours', 'his', 'her', 'hers', 
+        'its', 'our', 'ours', 'their', 'theirs', 'myself', 'yourself', 'himself', 'herself', 'itself', 'ourselves', 'yourselves', 'themselves', 
+        'other', 'others', 'this', 'that', 'these', 'those', 'who', 'whom', 'what', 'whose', 'which', 'that', 'all', 'each', 'either', 'neither', 
+        'one', 'any', 'oneself', 'such', 'same'
+    ])
+    show = []
+    total_event, no_arg_event, find_arg_event = 0, 0, 0
+    with open(simi_file, 'rt', encoding='utf-8') as f:
+        for line in f:
+            sample = json.loads(line.strip())
+            doc_id = sample['doc_id']
+            for offset, event in sample['relate_info'].items():
+                total_event += 1
+                if not (list(filter(lambda x: x['mention'].lower() not in word_filter, event['arguments'])) if use_filter else event['arguments']):
+                    no_arg_event += 1
+                    if (list(filter(lambda x: x['mention'].lower() not in word_filter, event['related_arguments'])) if use_filter else event['related_arguments']):
+                        find_arg_event += 1
+                        event['doc_id'] = doc_id
+                        event['offset'] = offset
+                        show.append(event)
+    print(total_event, no_arg_event, find_arg_event, no_arg_event - find_arg_event)
+    print(f"{(no_arg_event / total_event * 100):0.1f} => {((no_arg_event - find_arg_event) / total_event * 100):0.1f}")
+    for e in show[:10]:
+        print(e)
 
-
+analysis('simi_train_related_info.json')
+analysis('simi_dev_related_info.json')
+analysis('simi_gold_test_related_info.json')
+analysis('simi_epoch_3_test_related_info.json')
 
