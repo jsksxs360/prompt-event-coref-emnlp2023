@@ -12,7 +12,7 @@ sys.path.append('../../')
 from src.tools import seed_everything, NpEncoder
 from src.coref_prompt.arg import parse_args
 from src.coref_prompt.data import KBPCoref, KBPCorefTiny, get_dataLoader
-from src.coref_prompt.data import get_pred_arguments
+from src.coref_prompt.data import get_pred_related_info
 from src.coref_prompt.modeling import BertForBasePrompt, RobertaForBasePrompt, LongformerForBasePrompt
 from src.coref_prompt.prompt import create_prompt, create_verbalizer, get_special_tokens
 
@@ -136,8 +136,8 @@ def test(args, test_dataset, model, tokenizer, save_weights:list, prompt_type, v
 
 def predict(
     args, model, tokenizer, 
-    e1_global_offset:int, e1_trigger:str, e1_args:list, 
-    e2_global_offset:int, e2_trigger:str, e2_args:list, 
+    e1_global_offset:int, e1_trigger:str, e1_related_info:dict, 
+    e2_global_offset:int, e2_trigger:str, e2_related_info:dict, 
     sentences:list, sentences_lengths:list, 
     prompt_type, verbalizer
     ):
@@ -159,8 +159,8 @@ def predict(
     e1_sent_idx, e1_sent_start = find_event_sent(e1_global_offset, e1_trigger, sentences)
     e2_sent_idx, e2_sent_start = find_event_sent(e2_global_offset, e2_trigger, sentences)
     prompt_data = create_prompt(
-        e1_sent_idx, e1_sent_start, e1_trigger, e1_args, 
-        e2_sent_idx, e2_sent_start, e2_trigger, e2_args, 
+        e1_sent_idx, e1_sent_start, e1_trigger, e1_related_info, 
+        e2_sent_idx, e2_sent_start, e2_trigger, e2_related_info, 
         sentences, sentences_lengths, 
         prompt_type, args.model_type, tokenizer, args.max_seq_length
     )
@@ -256,7 +256,7 @@ if __name__ == '__main__':
         if args.train_data_type == 'normal':
             train_dataset = KBPCoref(
                 args.train_file, 
-                args.train_argument_file, 
+                args.train_simi_file, 
                 prompt_type=args.prompt_type, 
                 model_type=args.model_type, 
                 tokenizer=tokenizer, 
@@ -266,7 +266,7 @@ if __name__ == '__main__':
             train_dataset = KBPCorefTiny(
                 args.train_file, 
                 args.train_file_with_cos, 
-                args.train_argument_file, 
+                args.train_simi_file, 
                 neg_top_k=args.neg_top_k, 
                 prompt_type=args.prompt_type, 
                 model_type=args.model_type, 
@@ -277,7 +277,7 @@ if __name__ == '__main__':
         logger.info(f"[Train] Coref: {labels.count(1)} non-Coref: {labels.count(0)}")
         dev_dataset = KBPCoref(
             args.dev_file, 
-            args.dev_argument_file, 
+            args.dev_simi_file, 
             prompt_type=args.prompt_type, 
             model_type=args.model_type, 
             tokenizer=tokenizer, 
@@ -291,7 +291,7 @@ if __name__ == '__main__':
     if args.do_test:
         test_dataset = KBPCoref(
             args.test_file, 
-            args.test_argument_file, 
+            args.test_simi_file, 
             prompt_type=args.prompt_type, 
             model_type=args.model_type, 
             tokenizer=tokenizer, 
@@ -305,7 +305,7 @@ if __name__ == '__main__':
     if args.do_predict:
         sentence_dict = defaultdict(list) # {filename: [Sentence]}
         sentence_len_dict = defaultdict(list) # {filename: [sentence length]}
-        argument_dict = get_pred_arguments(args.pred_test_argument_file)
+        related_dict = get_pred_related_info(args.pred_test_simi_file)
         with open(args.test_file, 'rt', encoding='utf-8') as f:
             for line in f:
                 sample = json.loads(line.strip())
@@ -329,15 +329,15 @@ if __name__ == '__main__':
                     events_from_file = sample['pred_label']
                     sentences = sentence_dict[sample['doc_id']]
                     sentence_lengths = sentence_len_dict[sample['doc_id']]
-                    doc_args = argument_dict[sample['doc_id']]
+                    doc_related_info = related_dict[sample['doc_id']]
                     preds, probs = [], []
                     for i in range(len(events_from_file) - 1):
                         for j in range(i + 1, len(events_from_file)):
                             e_i, e_j = events_from_file[i], events_from_file[j]
                             pred, prob = predict(
                                 args, model, tokenizer,
-                                e_i['start'], e_i['trigger'], doc_args[e_i['start']], 
-                                e_j['start'], e_j['trigger'], doc_args[e_j['start']], 
+                                e_i['start'], e_i['trigger'], doc_related_info[e_i['start']], 
+                                e_j['start'], e_j['trigger'], doc_related_info[e_j['start']], 
                                 sentences, sentence_lengths, 
                                 args.prompt_type, verbalizer
                             )

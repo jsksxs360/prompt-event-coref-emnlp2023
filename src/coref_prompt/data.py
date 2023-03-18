@@ -24,7 +24,7 @@ def get_pred_related_info(simi_file:str) -> dict:
             related_info_dict[sample['doc_id']] = {
                 int(offset): {
                     'arguments': related_info['arguments'], 
-                    'related_triggers': related_info['related_info'], 
+                    'related_triggers': related_info['related_triggers'], 
                     'related_arguments': related_info['related_arguments']
                 }
                 for offset, related_info in sample['relate_info'].items()
@@ -635,7 +635,8 @@ if __name__ == '__main__':
     args.max_seq_length = 512
     args.model_type = 'longformer'
     args.model_checkpoint = '../../PT_MODELS/allenai/longformer-large-4096'
-    args.prompt_type = 'm_hta_hq'
+    args.prompt_type = 'm_htao_hq'
+    args.with_mask = False
 
     tokenizer = AutoTokenizer.from_pretrained(args.model_checkpoint)
     base_sp_tokens = ['<e1_start>', '<e1_end>', '<e2_start>', '<e2_end>', '<l1>', '<l2>', '<l3>', '<l4>', '<l5>', '<l6>']
@@ -648,7 +649,7 @@ if __name__ == '__main__':
     tokenizer.add_special_tokens(special_tokens_dict)
 
     # train_data = KBPCoref(
-    #     '../../data/train_filtered.json', '../../data/EventExtraction/omni_train_pred_args.json', 
+    #     '../../data/train_filtered.json', '../../data/KnowledgeExtraction/simi_train_related_info.json', 
     #     prompt_type='hn', model_type='longformer', tokenizer=tokenizer, max_length=512
     # )
     # print_data_statistic('../../data/train_filtered.json')
@@ -659,15 +660,15 @@ if __name__ == '__main__':
     #     print(train_data[i])
 
     train_small_data = KBPCorefTiny(
-        '../../data/train_filtered.json', '../../data/train_filtered_with_cos.json', '../../data/EventExtraction/omni_train_pred_args.json', 
+        '../../data/train_filtered.json', '../../data/train_filtered_with_cos.json', '../../data/KnowledgeExtraction/simi_train_related_info.json', 
         neg_top_k=3, prompt_type=args.prompt_type, model_type='longformer', tokenizer=tokenizer, max_length=512
     )
     print_data_statistic('../../data/train_filtered_with_cos.json')
     print(len(train_small_data))
     labels = [train_small_data[s_idx]['label'] for s_idx in range(len(train_small_data))]
     print('Coref:', labels.count(1), 'non-Coref:', labels.count(0))
-    # for i in range(5):
-    #     print(train_small_data[i])
+    for i in range(10):
+        print(train_small_data[i])
     
     verbalizer = {
         'coref': {
@@ -716,9 +717,9 @@ if __name__ == '__main__':
         print('batch_event_idx:', batch_data['batch_event_idx'])
         print('batch_t1_mask_idx:', batch_data['batch_t1_mask_idx'])
         print('batch_t2_mask_idx:', batch_data['batch_t2_mask_idx'])
-        print('subtype1:', batch_data['subtype1'])
-        print('subtype2:', batch_data['subtype2'])
         print('labels:', batch_data['labels'])
+        print('e1_subtype_labels:', batch_data['e1_subtype_labels'])
+        print('e2_subtype_labels:', batch_data['e2_subtype_labels'])
         print(tokenizer.decode(batch_data['batch_inputs']['input_ids'][0]))
         print('Testing dataloader...')
         batch_datas = iter(train_dataloader)
@@ -736,11 +737,11 @@ if __name__ == '__main__':
         print('batch_event_idx:', batch_data['batch_event_idx'])
         print('batch_t1_mask_idx:', batch_data['batch_t1_mask_idx'])
         print('batch_t2_mask_idx:', batch_data['batch_t2_mask_idx'])
-        print('type_match', batch_data['type_match'])
-        print('arg_match', batch_data['arg_match'])
-        print('subtype1:', batch_data['subtype1'])
-        print('subtype2:', batch_data['subtype2'])
         print('labels:', batch_data['labels'])
+        print('subtype_match_labels:', batch_data['subtype_match_labels'])
+        print('arg_match_labels:', batch_data['arg_match_labels'])
+        print('e1_subtype_labels:', batch_data['e1_subtype_labels'])
+        print('e2_subtype_labels:', batch_data['e2_subtype_labels'])
         print(tokenizer.decode(batch_data['batch_inputs']['input_ids'][0]))
         print('Testing dataloader...')
         batch_datas = iter(train_dataloader)

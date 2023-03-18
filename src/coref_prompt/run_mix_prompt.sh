@@ -13,10 +13,10 @@ python3 run_mix_prompt.py \
     --train_file_with_cos=../../data/train_filtered_with_cos.json \
     --dev_file=../../data/dev_filtered.json \
     --test_file=../../data/test_filtered.json \
-    --train_argument_file=../../data/EventExtraction/omni_train_pred_args.json \
-    --dev_argument_file=../../data/EventExtraction/omni_dev_pred_args.json \
-    --test_argument_file=../../data/EventExtraction/omni_gold_test_pred_args.json \
-    --pred_test_argument_file=../../data/EventExtraction/omni_epoch_3_test_pred_args.json \
+    --train_simi_file=../../data/KnowledgeExtraction/simi_train_related_info.json \
+    --dev_simi_file=../../data/KnowledgeExtraction/simi_dev_related_info.json \
+    --test_simi_file=../../data/KnowledgeExtraction/simi_gold_test_related_info.json \
+    --pred_test_simi_file=../../data/KnowledgeExtraction/simi_epoch_3_test_related_info.json \
     --train_data_type=tiny \
     --neg_top_k=3 \
     --max_seq_length=512 \

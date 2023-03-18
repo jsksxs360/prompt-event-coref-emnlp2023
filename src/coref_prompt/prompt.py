@@ -52,7 +52,8 @@ def create_event_context(
     max_length:
         max total token numbers of the two segments (not include [CLS], [SEP], etc.)
     # Return
-    type: context type, 'same_sent' or 'diff_sent', two events in the same/different sentence
+    type: 
+        context type, 'same_sent' or 'diff_sent', two events in the same/different sentence
     (e1/e2_)core_context: 
         host sentence that contains the event
     (e1/e2_)before_context: 
@@ -725,14 +726,24 @@ WORD_FILTER = set([
     'one', 'any', 'oneself', 'such', 'same'
 ])
 
+def remove_same_args(args):
+    added_args, new_args = set(), []
+    for arg in args:
+        if arg['mention'] not in added_args:
+            new_args.append(arg)
+            added_args.add(arg['mention'])
+    return new_args
+
 def convert_args_to_str(args:list, use_filter=True):
     if use_filter:
         args = filter(lambda x: x['mention'].lower() not in WORD_FILTER, args)
     arg_str = ''
     participants, places = (
-        list(set([arg for arg in args if arg['role'] == 'participant'])), 
-        list(set([arg for arg in args if arg['role'] == 'place']))
+        [arg for arg in args if arg['role'] == 'participant'], 
+        [arg for arg in args if arg['role'] == 'place']
     )
+    participants = remove_same_args(participants)
+    places = remove_same_args(places)
     if len(participants) > 0:
         participants.sort(key=lambda x: x['global_offset'])
         arg_str = f"with {', '.join([arg['mention'] for arg in participants])} as participants"
@@ -746,10 +757,12 @@ def convert_related_info_to_str(related_triggers:list, related_args:list, use_fi
         related_args = filter(lambda x: x['mention'].lower() not in WORD_FILTER, related_args)
     related_str = ''
     if len(related_triggers) > 0:
-        related_str = f"(with related events: {', '.join(related_triggers)}"
+        related_str = f"(with related events: {', '.join(set(related_triggers))}"
+    related_args = remove_same_args(related_args)
+    related_args.sort(key=lambda x: x['global_offset'])
     if len(related_args) > 0:
         related_str += f", and related participants/places: {', '.join([arg['mention'] for arg in related_args])})"
-    else:
+    elif related_str:
         related_str += ')'
     return related_str.strip()
 
