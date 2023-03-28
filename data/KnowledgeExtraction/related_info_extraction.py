@@ -50,7 +50,7 @@ def get_event_by_id(event_id, events):
             return e
     return None
 
-def create_simi_event_file(data_file, arg_file, simi_file, save_file, cosine_threshold=0.5):
+def create_simi_event_file(data_file, arg_file, simi_file, save_file, cosine_threshold):
     doc_arg_dict = get_pred_arguments(arg_file)
     doc_simi_dict = create_event_simi_dict(simi_file, cosine_threshold)
     Results = []
@@ -97,7 +97,7 @@ def get_event_by_id_for_testfile(event_id, events):
             return e
     return None
 
-def create_simi_event_file_for_testfile(data_file, arg_file, simi_file, save_file, cosine_threshold=0.5):
+def create_simi_event_file_for_testfile(data_file, arg_file, simi_file, save_file, cosine_threshold):
     doc_arg_dict = get_pred_arguments(arg_file)
     doc_simi_dict = create_event_simi_dict(simi_file, cosine_threshold)
     Results = []
@@ -138,32 +138,38 @@ def create_simi_event_file_for_testfile(data_file, arg_file, simi_file, save_fil
         for example_result in Results:
             f.write(json.dumps(example_result) + '\n')
 
+cosine_threshold = 0.9
+
 # create_simi_event_file(
 #     '../train_filtered.json', 
 #     'omni_train_pred_args.json', 
 #     '../train_filtered_with_cos.json', 
-#     'simi_train_related_info.json'
+#     f'simi_train_related_info_{cosine_threshold}.json', 
+#     cosine_threshold
 # )
 # create_simi_event_file(
 #     '../dev_filtered.json', 
 #     'omni_dev_pred_args.json', 
 #     '../dev_filtered_with_cos.json', 
-#     'simi_dev_related_info.json'
+#     f'simi_dev_related_info_{cosine_threshold}.json', 
+#     cosine_threshold
 # )
 # create_simi_event_file(
 #     '../test_filtered.json', 
 #     'omni_gold_test_pred_args.json', 
 #     '../test_filtered_with_cos.json', 
-#     'simi_gold_test_related_info.json'
+#     f'simi_gold_test_related_info_{cosine_threshold}.json', 
+#     cosine_threshold
 # )
 # create_simi_event_file_for_testfile(
 #     '../epoch_3_test_pred_events.json', 
 #     'omni_epoch_3_test_pred_args.json', 
 #     '../epoch_3_test_pred_events_with_cos.json', 
-#     'simi_epoch_3_test_related_info.json'
+#     f'simi_epoch_3_test_related_info_{cosine_threshold}.json', 
+#     cosine_threshold
 # )
 
-def analysis(simi_file, use_filter=True):
+def analysis(simi_file):
     word_filter = set([
         'i', 'me', 'you', 'he', 'him', 'she', 'her', 'it', 'we', 'us', 'you', 'they', 'them', 'my', 'mine', 'your', 'yours', 'his', 'her', 'hers', 
         'its', 'our', 'ours', 'their', 'theirs', 'myself', 'yourself', 'himself', 'herself', 'itself', 'ourselves', 'yourselves', 'themselves', 
@@ -178,20 +184,20 @@ def analysis(simi_file, use_filter=True):
             doc_id = sample['doc_id']
             for offset, event in sample['relate_info'].items():
                 total_event += 1
-                if not (list(filter(lambda x: x['mention'].lower() not in word_filter, event['arguments'])) if use_filter else event['arguments']):
+                if not event['arguments']:
                     no_arg_event += 1
-                    if (list(filter(lambda x: x['mention'].lower() not in word_filter, event['related_arguments'])) if use_filter else event['related_arguments']):
+                    if list(filter(lambda x: x['mention'].lower() not in word_filter, event['related_arguments'])):
                         find_arg_event += 1
                         event['doc_id'] = doc_id
                         event['offset'] = offset
                         show.append(event)
     print(total_event, no_arg_event, find_arg_event, no_arg_event - find_arg_event)
     print(f"{(no_arg_event / total_event * 100):0.1f} => {((no_arg_event - find_arg_event) / total_event * 100):0.1f}")
-    for e in show[:10]:
-        print(e)
+    # for e in show[:3]:
+    #     print(e)
 
-analysis('simi_train_related_info.json')
-analysis('simi_dev_related_info.json')
-analysis('simi_gold_test_related_info.json')
-analysis('simi_epoch_3_test_related_info.json')
+analysis(f'simi_train_related_info_{cosine_threshold}.json')
+analysis(f'simi_dev_related_info_{cosine_threshold}.json')
+analysis(f'simi_gold_test_related_info_{cosine_threshold}.json')
+analysis(f'simi_epoch_3_test_related_info_{cosine_threshold}.json')
 
