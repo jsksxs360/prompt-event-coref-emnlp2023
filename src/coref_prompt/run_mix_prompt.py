@@ -140,7 +140,7 @@ def predict(
     e1_global_offset:int, e1_trigger:str, e1_related_info:dict, 
     e2_global_offset:int, e2_trigger:str, e2_related_info:dict, 
     sentences:list, sentences_lengths:list, 
-    prompt_type, verbalizer
+    prompt_type, select_arg_strategy, verbalizer
     ):
 
     def find_event_sent(event_start, trigger, sent_list):
@@ -163,7 +163,8 @@ def predict(
         e1_sent_idx, e1_sent_start, e1_trigger, e1_related_info, 
         e2_sent_idx, e2_sent_start, e2_trigger, e2_related_info, 
         sentences, sentences_lengths, 
-        prompt_type, args.model_type, tokenizer, args.max_seq_length
+        prompt_type, select_arg_strategy, 
+        args.model_type, tokenizer, args.max_seq_length
     )
     prompt_text = prompt_data['prompt']
     # convert char offsets to token idxs
@@ -327,6 +328,7 @@ if __name__ == '__main__':
                 args.train_file, 
                 args.train_simi_file, 
                 prompt_type=args.prompt_type, 
+                select_arg_strategy=args.select_arg_strategy, 
                 model_type=args.model_type, 
                 tokenizer=tokenizer, 
                 max_length=args.max_seq_length
@@ -338,6 +340,7 @@ if __name__ == '__main__':
                 args.train_simi_file, 
                 neg_top_k=args.neg_top_k, 
                 prompt_type=args.prompt_type, 
+                select_arg_strategy=args.select_arg_strategy, 
                 model_type=args.model_type, 
                 tokenizer=tokenizer, 
                 max_length=args.max_seq_length
@@ -348,6 +351,7 @@ if __name__ == '__main__':
             args.dev_file, 
             args.dev_simi_file, 
             prompt_type=args.prompt_type, 
+            select_arg_strategy=args.select_arg_strategy, 
             model_type=args.model_type, 
             tokenizer=tokenizer, 
             max_length=args.max_seq_length
@@ -362,6 +366,7 @@ if __name__ == '__main__':
             args.test_file, 
             args.test_simi_file, 
             prompt_type=args.prompt_type, 
+            select_arg_strategy=args.select_arg_strategy, 
             model_type=args.model_type, 
             tokenizer=tokenizer, 
             max_length=args.max_seq_length
@@ -408,7 +413,7 @@ if __name__ == '__main__':
                                 e_i['start'], e_i['trigger'], doc_related_info[e_i['start']], 
                                 e_j['start'], e_j['trigger'], doc_related_info[e_j['start']], 
                                 sentences, sentence_lengths, 
-                                args.prompt_type, verbalizer
+                                args.prompt_type, args.select_arg_strategy, verbalizer
                             )
                             preds.append(pred)
                             probs.append(prob)

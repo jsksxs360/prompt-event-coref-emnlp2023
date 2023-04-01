@@ -2,7 +2,7 @@ from torch.utils.data import Dataset, DataLoader
 import json
 from tqdm.auto import tqdm
 from collections import defaultdict
-from prompt import PROMPT_TYPE, EVENT_SUBTYPES, subtype2id, id2subtype
+from prompt import PROMPT_TYPE, SELECT_ARG_STRATEGY, EVENT_SUBTYPES, subtype2id, id2subtype
 from prompt import create_prompt
 
 def get_pred_related_info(simi_file:str) -> dict:
@@ -38,15 +38,15 @@ def get_event_cluster_id(event_id:str, clusters:list) -> str:
     raise ValueError(f'Unknown event_id: {event_id}')
 
 class KBPCoref(Dataset):
-    def __init__(self, data_file:str, simi_file:str, prompt_type:str, model_type:str, tokenizer, max_length:int):
-        assert prompt_type in PROMPT_TYPE and model_type in ['bert', 'roberta', 'longformer']
+    def __init__(self, data_file:str, simi_file:str, prompt_type:str, select_arg_strategy:str, model_type:str, tokenizer, max_length:int):
+        assert prompt_type in PROMPT_TYPE and select_arg_strategy in SELECT_ARG_STRATEGY and model_type in ['bert', 'roberta', 'longformer']
         self.model_type = model_type
         self.tokenizer = tokenizer
         self.max_length = max_length
         self.related_dict = get_pred_related_info(simi_file)
-        self.data = self.load_data(data_file, prompt_type)
+        self.data = self.load_data(data_file, prompt_type, select_arg_strategy)
     
-    def load_data(self, data_file, prompt_type:str):
+    def load_data(self, data_file, prompt_type:str, select_arg_strategy:str):
         Data = []
         with open(data_file, 'rt', encoding='utf-8') as f:
             for line in tqdm(f.readlines()):
@@ -67,7 +67,8 @@ class KBPCoref(Dataset):
                             event_1['sent_idx'], event_1['sent_start'], event_1['trigger'], event_1_related_info, 
                             event_2['sent_idx'], event_2['sent_start'], event_2['trigger'], event_2_related_info, 
                             sentences, sentences_lengths, 
-                            prompt_type, self.model_type, self.tokenizer, self.max_length
+                            prompt_type, select_arg_strategy, 
+                            self.model_type, self.tokenizer, self.max_length
                         )
                         Data.append({
                             'id': sample['doc_id'], 
@@ -121,20 +122,21 @@ def get_noncoref_ids(simi_list, top_k):
     return noncoref_ids
 
 class KBPCorefTiny(Dataset):
-    def __init__(self, data_file:str, data_file_with_cos:str, simi_file:str, neg_top_k:int, prompt_type:str, model_type:str, tokenizer, max_length:int):
+    def __init__(self, data_file:str, data_file_with_cos:str, simi_file:str, neg_top_k:int, 
+                 prompt_type:str, select_arg_strategy:str, model_type:str, tokenizer, max_length:int):
         '''
         - data_file: source train data file
         - data_file_with_cos: train data file with event similarities
         '''
-        assert prompt_type in PROMPT_TYPE and model_type in ['bert', 'roberta', 'longformer']
+        assert prompt_type in PROMPT_TYPE and select_arg_strategy in SELECT_ARG_STRATEGY and model_type in ['bert', 'roberta', 'longformer']
         assert neg_top_k > 0
         self.model_type = model_type
         self.tokenizer = tokenizer
         self.max_length = max_length
         self.related_dict = get_pred_related_info(simi_file)
-        self.data = self.load_data(data_file, data_file_with_cos, neg_top_k, prompt_type)
+        self.data = self.load_data(data_file, data_file_with_cos, neg_top_k, prompt_type, select_arg_strategy)
     
-    def load_data(self, data_file, data_file_with_cos, neg_top_k, prompt_type:str):
+    def load_data(self, data_file, data_file_with_cos, neg_top_k, prompt_type:str, select_arg_strategy:str):
         Data = []
         with open(data_file, 'rt', encoding='utf-8') as f, open(data_file_with_cos, 'rt', encoding='utf-8') as f_cos:
             # positive samples (coref pairs)
@@ -156,7 +158,8 @@ class KBPCorefTiny(Dataset):
                                 event_1['sent_idx'], event_1['sent_start'], event_1['trigger'], event_1_related_info, 
                                 event_2['sent_idx'], event_2['sent_start'], event_2['trigger'], event_2_related_info, 
                                 sentences, sentences_lengths, 
-                                prompt_type, self.model_type, self.tokenizer, self.max_length
+                                prompt_type, select_arg_strategy, 
+                                self.model_type, self.tokenizer, self.max_length
                             )
                             Data.append({
                                 'id': sample['doc_id'], 
@@ -201,7 +204,8 @@ class KBPCorefTiny(Dataset):
                                 event_1['sent_idx'], event_1['sent_start'], event_1['trigger'], event_1_related_info, 
                                 event_2['sent_idx'], event_2['sent_start'], event_2['trigger'], event_2_related_info, 
                                 sentences, sentences_lengths, 
-                                prompt_type, self.model_type, self.tokenizer, self.max_length
+                                prompt_type, select_arg_strategy, 
+                                self.model_type, self.tokenizer, self.max_length
                             )
                             Data.append({
                                 'id': sample['doc_id'], 
@@ -635,7 +639,8 @@ if __name__ == '__main__':
     args.max_seq_length = 512
     args.model_type = 'longformer'
     args.model_checkpoint = '../../PT_MODELS/allenai/longformer-large-4096'
-    args.prompt_type = 'm_htao_hq'
+    args.prompt_type = 'm_htao_hn'
+    args.select_arg_strategy = 'filter_related_args'
     args.with_mask = False
 
     tokenizer = AutoTokenizer.from_pretrained(args.model_checkpoint)
@@ -649,8 +654,9 @@ if __name__ == '__main__':
     tokenizer.add_special_tokens(special_tokens_dict)
 
     # train_data = KBPCoref(
-    #     '../../data/train_filtered.json', '../../data/KnowledgeExtraction/simi_train_related_info.json', 
-    #     prompt_type='hn', model_type='longformer', tokenizer=tokenizer, max_length=512
+    #     '../../data/train_filtered.json', '../../data/KnowledgeExtraction/simi_train_related_info_0.75.json', 
+    #     prompt_type=args.select_arg_strategy, select_arg_strategy=args.select_arg_strategy, 
+    #     model_type='longformer', tokenizer=tokenizer, max_length=512
     # )
     # print_data_statistic('../../data/train_filtered.json')
     # print(len(train_data))
@@ -660,8 +666,9 @@ if __name__ == '__main__':
     #     print(train_data[i])
 
     train_small_data = KBPCorefTiny(
-        '../../data/train_filtered.json', '../../data/train_filtered_with_cos.json', '../../data/KnowledgeExtraction/simi_train_related_info.json', 
-        neg_top_k=3, prompt_type=args.prompt_type, model_type='longformer', tokenizer=tokenizer, max_length=512
+        '../../data/train_filtered.json', '../../data/train_filtered_with_cos.json', '../../data/KnowledgeExtraction/simi_train_related_info_0.75.json', 
+        neg_top_k=3, prompt_type=args.prompt_type, select_arg_strategy=args.select_arg_strategy, 
+        model_type='longformer', tokenizer=tokenizer, max_length=512
     )
     print_data_statistic('../../data/train_filtered_with_cos.json')
     print(len(train_small_data))

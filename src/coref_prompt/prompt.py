@@ -13,6 +13,7 @@ PROMPT_TYPE = [
     'm_ht_hn', 'm_ht_hc', 'm_ht_hq', 'm_hta_hn', 'm_hta_hc', 'm_hta_hq', 'm_htao_hn', 'm_htao_hc', 'm_htao_hq', # mix prompts
     'm_st_hn', 'm_st_hc', 'm_st_hq', 'm_sta_hn', 'm_sta_hc', 'm_sta_hq', 'm_stao_hn', 'm_stao_hc', 'm_stao_hq'
 ]
+SELECT_ARG_STRATEGY = ['no_filter', 'filter_related_args', 'filter_all']
 
 EVENT_SUBTYPES = [ # 18 subtypes
     'artifact', 'transferownership', 'transaction', 'broadcast', 'contact', 'demonstrate', \
@@ -663,11 +664,32 @@ def findall(p, s):
         yield i
         i = s.find(p, i+1)
 
+def select_args(my_args, other_related_info, match_other_related_args=True):
+    if not my_args:
+        return []
+    other_has_part, other_has_place = False, False
+    if match_other_related_args:
+        other_args = other_related_info['arguments'] + list(
+            filter(lambda x: x['mention'].lower() not in WORD_FILTER, other_related_info['related_arguments'])
+        )
+    else:
+        other_args = other_related_info['arguments']
+    for arg in other_args:
+        if arg['role'] == 'participant':
+            other_has_part = True
+        elif arg['role'] == 'place':
+            other_has_place = True    
+    return [
+        arg for arg in my_args 
+        if (arg['role'] == 'participant' and other_has_part) or (arg['role'] == 'place' and other_has_place)
+    ]
+
 def create_prompt(
     e1_sent_idx:int, e1_sent_start:int, e1_trigger:str, e1_related_info: dict, 
     e2_sent_idx:int, e2_sent_start:int, e2_trigger:str, e2_related_info: dict, 
     sentences:list, sentence_lens:list, 
-    prompt_type:str, model_type, tokenizer, max_length:int
+    prompt_type:str, select_arg_strategy:str, 
+    model_type, tokenizer, max_length:int
     ) -> dict:
 
     special_token_dict = {
@@ -744,11 +766,23 @@ def create_prompt(
             'trigger_offsets': trigger_offsets
         }
     elif prompt_type.startswith('t'): # knowledge prompt
-        e1_arg_str, e2_arg_str = convert_args_to_str(e1_related_info['arguments']), convert_args_to_str(e2_related_info['arguments'])
-        e1_related_str, e2_related_str = (
-            convert_related_info_to_str(e1_related_info['related_triggers'], e1_related_info['related_arguments']), 
-            convert_related_info_to_str(e2_related_info['related_triggers'], e2_related_info['related_arguments']), 
-        )
+        if select_arg_strategy == 'filter_all':
+            e1_arg_str, e2_arg_str = (
+                convert_args_to_str(select_args(e1_related_info['arguments'], e2_related_info, 'o' in prompt_type)), 
+                convert_args_to_str(select_args(e2_related_info['arguments'], e1_related_info, 'o' in prompt_type))
+            )
+        else:
+            e1_arg_str, e2_arg_str = convert_args_to_str(e1_related_info['arguments']), convert_args_to_str(e2_related_info['arguments'])
+        if select_arg_strategy in ['filter_all', 'filter_related_args']:
+            e1_related_str, e2_related_str = (
+                convert_related_info_to_str(e1_related_info['related_triggers'], select_args(e1_related_info['related_arguments'], e2_related_info, 'o' in prompt_type)), 
+                convert_related_info_to_str(e2_related_info['related_triggers'], select_args(e2_related_info['related_arguments'], e1_related_info, 'o' in prompt_type)), 
+            )
+        else:
+            e1_related_str, e2_related_str = (
+                convert_related_info_to_str(e1_related_info['related_triggers'], e1_related_info['related_arguments']), 
+                convert_related_info_to_str(e2_related_info['related_triggers'], e2_related_info['related_arguments']), 
+            )
         template_data = create_knowledge_template(e1_trigger, e2_trigger, e1_arg_str, e2_arg_str, e1_related_str, e2_related_str, prompt_type, special_token_dict)
         trigger_offsets = template_data['trigger_offsets']
         assert set(template_data['special_tokens']).issubset(set(tokenizer.additional_special_tokens))
@@ -817,11 +851,26 @@ def create_prompt(
             'trigger_offsets': trigger_offsets
         }
     elif prompt_type.startswith('m'): # mix prompt
-        e1_arg_str, e2_arg_str = convert_args_to_str(e1_related_info['arguments'], use_filter=False), convert_args_to_str(e2_related_info['arguments'], use_filter=False)
-        e1_related_str, e2_related_str = (
-            convert_related_info_to_str(e1_related_info['related_triggers'], e1_related_info['related_arguments']), 
-            convert_related_info_to_str(e2_related_info['related_triggers'], e2_related_info['related_arguments']), 
-        )
+        if select_arg_strategy == 'filter_all':
+            e1_arg_str, e2_arg_str = (
+                convert_args_to_str(select_args(e1_related_info['arguments'], e2_related_info, 'o' in prompt_type), use_filter=False), 
+                convert_args_to_str(select_args(e2_related_info['arguments'], e1_related_info, 'o' in prompt_type), use_filter=False)
+            )
+        else:
+            e1_arg_str, e2_arg_str = (
+                convert_args_to_str(e1_related_info['arguments'], use_filter=False), 
+                convert_args_to_str(e2_related_info['arguments'], use_filter=False)
+            )
+        if select_arg_strategy in ['filter_all', 'filter_related_args']:
+            e1_related_str, e2_related_str = (
+                convert_related_info_to_str(e1_related_info['related_triggers'], select_args(e1_related_info['related_arguments'], e2_related_info, 'o' in prompt_type)), 
+                convert_related_info_to_str(e2_related_info['related_triggers'], select_args(e2_related_info['related_arguments'], e1_related_info, 'o' in prompt_type)), 
+            )
+        else:
+            e1_related_str, e2_related_str = (
+                convert_related_info_to_str(e1_related_info['related_triggers'], e1_related_info['related_arguments']), 
+                convert_related_info_to_str(e2_related_info['related_triggers'], e2_related_info['related_arguments']), 
+            )
         template_data = create_mix_template(e1_trigger, e2_trigger, e1_arg_str, e2_arg_str, e1_related_str, e2_related_str, prompt_type, special_token_dict)
         template_length = (
             len(tokenizer.tokenize(template_data['prefix_template'])) + 

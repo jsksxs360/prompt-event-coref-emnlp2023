@@ -26,6 +26,7 @@ def parse_args():
     )
     parser.add_argument("--max_seq_length", default=512, type=int, required=True)
     parser.add_argument("--prompt_type", type=str, required=True)
+    parser.add_argument("--select_arg_strategy", type=str, required=True)
     parser.add_argument("--with_mask", action="store_true", help="Whether to input the mask prompts.")
     parser.add_argument("--matching_style", default="none", type=str, required=True, 
         help="incorporate event matching representations", choices=['product', 'cosine', 'product_cosine']
