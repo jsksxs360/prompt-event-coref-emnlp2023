@@ -33,34 +33,72 @@ def get_pred_related_info(simi_file:str) -> dict:
             }
     return related_info_dict
 
-def get_event_arg_status(related_info):
-    has_arg, find_arg = False, False
-    has_part, has_place = False, False
-    related_part, related_place = False, False
-    related_arguments = list(filter(lambda x: x['mention'].lower() not in WORD_FILTER, related_info['related_arguments']))
-    if related_info['arguments']:
-        has_arg = True
-        for arg in related_info['arguments']:
-            if arg['role'] == 'participant':
-                has_part = True
-            elif arg['role'] == 'place':
-                has_place = True
+def select_args(my_args, other_related_info, match_other_related_args=True):
+    if not my_args:
+        return []
+    other_has_part, other_has_place = False, False
+    if match_other_related_args:
+        other_args = other_related_info['arguments'] + list(
+            filter(lambda x: x['mention'].lower() not in WORD_FILTER, other_related_info['related_arguments'])
+        )
     else:
-        if related_arguments:
-            find_arg = True
-    if related_arguments:
-        for arg in related_arguments:
-            if arg['role'] == 'participant':
-                related_part = True
-            elif arg['role'] == 'place':
-                related_place = True
+        other_args = other_related_info['arguments']
+    for arg in other_args:
+        if arg['role'] == 'participant':
+            other_has_part = True
+        elif arg['role'] == 'place':
+            other_has_place = True    
+    return [
+        arg for arg in my_args 
+        if (arg['role'] == 'participant' and other_has_part) or (arg['role'] == 'place' and other_has_place)
+    ]
+
+def convert_args_to_str(args:list, use_filter=True):
+    if use_filter:
+        args = filter(lambda x: x['mention'].lower() not in WORD_FILTER, args)
+    participants, places = (
+        [arg for arg in args if arg['role'] == 'participant'], 
+        [arg for arg in args if arg['role'] == 'place']
+    )
+    return participants, places
+
+def convert_related_info_to_str(related_args:list, use_filter=True):
+    if use_filter:
+        related_args = list(filter(lambda x: x['mention'].lower() not in WORD_FILTER, related_args))
+    related_participants, related_places = (
+        [arg for arg in related_args if arg['role'] == 'participant'], 
+        [arg for arg in related_args if arg['role'] == 'place']
+    )
+    return related_participants, related_places
+
+def get_event_arg_status(prompt_type, e1_related_info, e2_related_info, select_arg_strategy):
+    if select_arg_strategy == 'filter_all':
+        e1_part, e1_place = convert_args_to_str(select_args(e1_related_info['arguments'], e2_related_info, 'o' in prompt_type), not prompt_type.startswith('m'))
+        e2_part, e2_place = convert_args_to_str(select_args(e2_related_info['arguments'], e1_related_info, 'o' in prompt_type), not prompt_type.startswith('m'))
+    else:
+        e1_part, e1_place = convert_args_to_str(e1_related_info['arguments'], not prompt_type.startswith('m'))
+        e2_part, e2_place = convert_args_to_str(e2_related_info['arguments'], not prompt_type.startswith('m'))
+    e1_related_triggers, e2_related_triggers = e1_related_info['related_triggers'], e2_related_info['related_triggers']
+    if not e1_related_triggers or not e2_related_triggers:
+        e1_related_triggers, e2_related_triggers = [], []
+    if select_arg_strategy in ['filter_all', 'filter_related_args']:
+        e1_related_part, e1_related_places = convert_related_info_to_str(select_args(e1_related_info['related_arguments'], e2_related_info, 'o' in prompt_type))
+        e2_related_part, e2_related_places = convert_related_info_to_str(select_args(e2_related_info['related_arguments'], e1_related_info, 'o' in prompt_type))
+    else:
+        e1_related_part, e1_related_places = convert_related_info_to_str(e1_related_info['related_arguments'])
+        e2_related_part, e2_related_places = convert_related_info_to_str(e2_related_info['related_arguments'])
     return {
-        'has_arg': has_arg, 'find_arg': find_arg, 
-        'has_part': has_part, 'has_place': has_place, 
-        'related_part': related_part, 'related_place': related_place
+        'e1_has_part': bool(e1_part), 'e1_has_place': bool(e1_place), 
+        'e1_has_related_triggers': bool(e1_related_triggers), 
+        'e1_has_related_part': bool(e1_related_part), 
+        'e1_has_related_places': bool(e1_related_places), 
+        'e2_has_part': bool(e2_part), 'e2_has_place': bool(e2_place), 
+        'e2_has_related_triggers': bool(e2_related_triggers), 
+        'e2_has_related_part': bool(e2_related_part), 
+        'e2_has_related_places': bool(e2_related_places)
     }
 
-def get_gold_corefs(gold_test_file:str, gold_test_simi_file:str) -> dict:
+def get_gold_corefs(prompt_type, select_arg_strategy, gold_test_file:str, gold_test_simi_file:str) -> dict:
     '''get gold event pair statistics
     # Returns:
     gold_dict: 
@@ -68,8 +106,11 @@ def get_gold_corefs(gold_test_file:str, gold_test_simi_file:str) -> dict:
             doc_id: {
                 {e_i_start}-{e_j_start}: {
                     'coref': 1/0, 
-                    'e_i_has_arg','e_j_has_arg': True/False, 
-                    'e_i_find_arg', 'e_j_find_arg': True/False, 
+                    'e_i_has_part','e_i_has_place': True/False, 
+                    'e_i_has_related_triggers': True/False,  
+                    'e_i_has_related_part': True/False, 
+                    'e_i_has_related_places': True/False, 
+                    ...
                     'sent_dist': sentence distance, 
                     'e_i_link_len', 'e_j_link_len': event link length
                 }, ...
@@ -94,42 +135,47 @@ def get_gold_corefs(gold_test_file:str, gold_test_simi_file:str) -> dict:
                 e_i_start = events[i]['start']
                 e_i_cluster_id, e_i_link_len = _get_event_cluster_id_and_link_len(events[i]['event_id'], clusters)
                 assert e_i_cluster_id is not None
-                e_i_arg_status = get_event_arg_status(related_dict[sample['doc_id']][e_i_start])
+                e_i_related_info = related_dict[sample['doc_id']][e_i_start]
                 e_i_sent_idx = events[i]['sent_idx']
                 for j in range(i + 1, len(events)):
                     e_j_start = events[j]['start']
                     e_j_cluster_id, e_j_link_len = _get_event_cluster_id_and_link_len(events[j]['event_id'], clusters)
                     assert e_j_cluster_id is not None
-                    e_j_arg_status = get_event_arg_status(related_dict[sample['doc_id']][e_j_start])
+                    e_j_related_info = related_dict[sample['doc_id']][e_j_start]
                     e_j_sent_idx = events[j]['sent_idx']
+                    arg_status = get_event_arg_status(prompt_type, e_i_related_info, e_j_related_info, select_arg_strategy)
                     if e_i_start < e_j_start:
                         event_pairs[f'{e_i_start}-{e_j_start}'] = {
                             'coref': 1 if e_i_cluster_id == e_j_cluster_id else 0, 
-                            'e_i_has_arg': e_i_arg_status['has_arg'], 'e_j_has_arg': e_j_arg_status['has_arg'], 
-                            'e_i_find_arg': e_i_arg_status['find_arg'], 'e_j_find_arg': e_j_arg_status['find_arg'], 
-                            'e_i_has_part': e_i_arg_status['has_part'], 'e_i_has_place': e_i_arg_status['has_place'], 
-                            'e_j_has_part': e_j_arg_status['has_part'], 'e_j_has_place': e_j_arg_status['has_place'], 
-                            'e_i_related_part': e_i_arg_status['related_part'], 'e_i_related_place': e_i_arg_status['related_place'], 
-                            'e_j_related_part': e_j_arg_status['related_part'], 'e_j_related_place': e_j_arg_status['related_place'], 
+                            'e_i_has_part': arg_status['e1_has_part'], 'e_i_has_place': arg_status['e1_has_place'], 
+                            'e_i_has_related_triggers': arg_status['e1_has_related_triggers'], 
+                            'e_i_has_related_part': arg_status['e1_has_related_part'], 
+                            'e_i_has_related_places': arg_status['e1_has_related_places'], 
+                            'e_j_has_part': arg_status['e2_has_part'], 'e_j_has_place': arg_status['e2_has_place'], 
+                            'e_j_has_related_triggers': arg_status['e2_has_related_triggers'], 
+                            'e_j_has_related_part': arg_status['e2_has_related_part'], 
+                            'e_j_has_related_places': arg_status['e2_has_related_places'], 
                             'sent_dist': abs(int(e_i_sent_idx) - int(e_j_sent_idx)), 
                             'e_i_link_len': e_i_link_len, 'e_j_link_len': e_j_link_len
                         }
                     else:
                         event_pairs[f'{e_j_start}-{e_i_start}'] = {
                             'coref': 1 if e_i_cluster_id == e_j_cluster_id else 0, 
-                            'e_i_has_arg': e_j_arg_status['has_arg'], 'e_j_has_arg': e_i_arg_status['has_arg'], 
-                            'e_i_find_arg': e_j_arg_status['find_arg'], 'e_j_find_arg': e_i_arg_status['find_arg'], 
-                            'e_i_has_part': e_j_arg_status['has_part'], 'e_i_has_place': e_j_arg_status['has_place'], 
-                            'e_j_has_part': e_i_arg_status['has_part'], 'e_j_has_place': e_i_arg_status['has_place'], 
-                            'e_i_related_part': e_j_arg_status['related_part'], 'e_i_related_place': e_j_arg_status['related_place'], 
-                            'e_j_related_part': e_i_arg_status['related_part'], 'e_j_related_place': e_i_arg_status['related_place'], 
+                            'e_i_has_part': arg_status['e2_has_part'], 'e_i_has_place': arg_status['e2_has_place'], 
+                            'e_i_has_related_triggers': arg_status['e2_has_related_triggers'], 
+                            'e_i_has_related_part': arg_status['e2_has_related_part'], 
+                            'e_i_has_related_places': arg_status['e2_has_related_places'], 
+                            'e_j_has_part': arg_status['e1_has_part'], 'e_j_has_place': arg_status['e1_has_place'], 
+                            'e_j_has_related_triggers': arg_status['e1_has_related_triggers'], 
+                            'e_j_has_related_part': arg_status['e1_has_related_part'], 
+                            'e_j_has_related_places': arg_status['e1_has_related_places'], 
                             'sent_dist': abs(int(e_i_sent_idx) - int(e_j_sent_idx)), 
                             'e_i_link_len': e_j_link_len, 'e_j_link_len': e_i_link_len
                         }
             gold_dict[sample['doc_id']] = event_pairs
     return gold_dict
 
-def get_pred_coref_results(pred_test_file:str, pred_test_simi_file:str) -> dict:
+def get_pred_coref_results(prompt_type, select_arg_strategy, pred_test_file:str, pred_test_simi_file:str) -> dict:
     '''get pred event pair statistics
     # Returns:
     pred_dict: 
@@ -137,8 +183,11 @@ def get_pred_coref_results(pred_test_file:str, pred_test_simi_file:str) -> dict:
             doc_id: {
                 {e_i_start}-{e_j_start}: {
                     'coref': 1/0, 
-                    'e_i_has_arg','e_j_has_arg': True/False, 
-                    'e_i_find_arg', 'e_j_find_arg': True/False, 
+                    'e_i_has_part','e_i_has_place': True/False, 
+                    'e_i_has_related_triggers': True/False,  
+                    'e_i_has_related_part': True/False, 
+                    'e_i_has_related_places': True/False, 
+                    ...
                     'sent_dist': sentence distance, 
                     'e_i_link_len', 'e_j_link_len': event link length
                 }, ...
@@ -166,21 +215,24 @@ def get_pred_coref_results(pred_test_file:str, pred_test_simi_file:str) -> dict:
                 e_i_start = events[i]['start']
                 e_i_sent_idx = _get_event_sent_idx(events[i]['start'], events[i]['end'], sents)
                 assert e_i_sent_idx is not None
-                e_i_arg_status = get_event_arg_status(related_dict[sample['doc_id']][e_i_start])
+                e_i_related_info = related_dict[sample['doc_id']][e_i_start]
                 for j in range(i + 1, len(events)):
                     e_j_start = events[j]['start']
                     e_j_sent_idx = _get_event_sent_idx(events[j]['start'], events[j]['end'], sents)
                     assert e_j_sent_idx is not None
-                    e_j_arg_status = get_event_arg_status(related_dict[sample['doc_id']][e_j_start])
+                    e_j_related_info = related_dict[sample['doc_id']][e_j_start]
                     assert e_i_start < e_j_start
+                    arg_status = get_event_arg_status(prompt_type, e_i_related_info, e_j_related_info, select_arg_strategy)
                     event_pairs[f'{e_i_start}-{e_j_start}'] = {
                         'coref': pred_labels[event_pair_idx], 
-                        'e_i_has_arg': e_i_arg_status['has_arg'], 'e_j_has_arg': e_j_arg_status['has_arg'], 
-                        'e_i_find_arg': e_i_arg_status['find_arg'], 'e_j_find_arg': e_j_arg_status['find_arg'], 
-                        'e_i_has_part': e_i_arg_status['has_part'], 'e_i_has_place': e_i_arg_status['has_place'], 
-                        'e_j_has_part': e_j_arg_status['has_part'], 'e_j_has_place': e_j_arg_status['has_place'], 
-                        'e_i_related_part': e_i_arg_status['related_part'], 'e_i_related_place': e_i_arg_status['related_place'], 
-                        'e_j_related_part': e_j_arg_status['related_part'], 'e_j_related_place': e_j_arg_status['related_place'], 
+                        'e_i_has_part': arg_status['e1_has_part'], 'e_i_has_place': arg_status['e1_has_place'], 
+                        'e_i_has_related_triggers': arg_status['e1_has_related_triggers'], 
+                        'e_i_has_related_part': arg_status['e1_has_related_part'], 
+                        'e_i_has_related_places': arg_status['e1_has_related_places'], 
+                        'e_j_has_part': arg_status['e2_has_part'], 'e_j_has_place': arg_status['e2_has_place'], 
+                        'e_j_has_related_triggers': arg_status['e2_has_related_triggers'], 
+                        'e_j_has_related_part': arg_status['e2_has_related_part'], 
+                        'e_j_has_related_places': arg_status['e2_has_related_places'], 
                         'sent_dist': abs(int(e_i_sent_idx) - int(e_j_sent_idx)), 
                         'e_i_link_len': 0, 'e_j_link_len': 0
                     }
@@ -189,10 +241,14 @@ def get_pred_coref_results(pred_test_file:str, pred_test_simi_file:str) -> dict:
             pred_dict[sample['doc_id']] = event_pairs
     return pred_dict
 
-def get_event_pair_set(gold_coref_file, gold_simi_coref_file, pred_coref_file, pred_simi_coref_file):
+def get_event_pair_set(
+    prompt_type, select_arg_strategy, 
+    gold_coref_file, gold_simi_coref_file, 
+    pred_coref_file, pred_simi_coref_file
+    ):
 
-    gold_coref_results = get_gold_corefs(gold_coref_file, gold_simi_coref_file)
-    pred_coref_results = get_pred_coref_results(pred_coref_file, pred_simi_coref_file)
+    gold_coref_results = get_gold_corefs(prompt_type, select_arg_strategy, gold_coref_file, gold_simi_coref_file)
+    pred_coref_results = get_pred_coref_results(prompt_type, select_arg_strategy, pred_coref_file, pred_simi_coref_file)
 
     new_gold_coref_results = {}
     for doc_id, event_pairs in gold_coref_results.items():
