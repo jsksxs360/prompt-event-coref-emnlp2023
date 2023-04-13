@@ -3,8 +3,16 @@ import sys
 sys.path.append('../../')
 from src.analysis.utils import get_event_pair_set
 
-def all_metrics(gold_coref_file, gold_simi_coref_file, pred_coref_file, pred_simi_coref_file):
-    gold_coref_results, pred_coref_results = get_event_pair_set(gold_coref_file, gold_simi_coref_file, pred_coref_file, pred_simi_coref_file)
+def all_metrics(
+    prompt_type, select_arg_strategy, 
+    gold_coref_file, gold_simi_coref_file, 
+    pred_coref_file, pred_simi_coref_file
+    ):
+    _, gold_coref_results, pred_coref_results = get_event_pair_set(
+        prompt_type, select_arg_strategy, 
+        gold_coref_file, gold_simi_coref_file, 
+        pred_coref_file, pred_simi_coref_file
+    )
     all_event_pairs = [] # (gold_coref, pred_coref)
     for doc_id in gold_coref_results:
         gold_unrecognized_event_pairs, gold_recognized_event_pairs = (
@@ -25,14 +33,20 @@ def all_metrics(gold_coref_file, gold_simi_coref_file, pred_coref_file, pred_sim
     metrics = {'ALL': classification_report(y_true=y_true, y_pred=y_pred, output_dict=True)['1']}
     return metrics
 
+# prompt_type = 'm_hta_hn'
+# select_arg_strategy = 'no_filter'
 # gold_coref_file = '../../data/test.json'
 # gold_simi_coref_file = '../../data/KnowledgeExtraction/simi_gold_test_related_info_0.75.json'
-# pred_coref_file = '../clustering/event-event/epoch_7_dev_f1_74.6407_weights.bin_longformer_m_hta_hn_test_pred_corefs.json'
+# pred_coref_file = '../clustering/event-event/epoch_5_dev_f1_73.5794_weights.bin_longformer_m_hta_hn_test_pred_corefs.json'
 # pred_simi_coref_file = '../../data/KnowledgeExtraction/simi_epoch_3_test_related_info_0.75.json'
-# print(all_metrics(gold_coref_file, gold_simi_coref_file, pred_coref_file, pred_simi_coref_file))
+# print(all_metrics(prompt_type, select_arg_strategy, gold_coref_file, gold_simi_coref_file, pred_coref_file, pred_simi_coref_file))
 
 def different_has_arg_status_metrics(prompt_type, select_arg_strategy, gold_coref_file, gold_simi_coref_file, pred_coref_file, pred_simi_coref_file):
-    gold_coref_results, pred_coref_results = get_event_pair_set(prompt_type, select_arg_strategy, gold_coref_file, gold_simi_coref_file, pred_coref_file, pred_simi_coref_file)
+    event_pair_info, gold_coref_results, pred_coref_results = get_event_pair_set(
+        prompt_type, select_arg_strategy, 
+        gold_coref_file, gold_simi_coref_file, 
+        pred_coref_file, pred_simi_coref_file
+    )
     both_no, one_has, both_have = [], [], []
     one_has_part, one_has_place, one_has_part_place = [], [], []
     both_have_part, both_have_place, both_have_part_place, both_have_unbalance = [], [], [], []
@@ -47,10 +61,11 @@ def different_has_arg_status_metrics(prompt_type, select_arg_strategy, gold_core
             pred_coref_result_dict['recognized_event_pairs'], 
             pred_coref_result_dict['wrong_event_pairs']
         )
-        for pair_results in gold_unrecognized_event_pairs.values():
+        for pair_id, pair_coref_info in gold_unrecognized_event_pairs.items():
+            pair_results = event_pair_info[doc_id][pair_id]
             e_i_has_arg = pair_results['e_i_has_part'] or pair_results['e_i_has_place']
             e_j_has_arg = pair_results['e_j_has_part'] or pair_results['e_j_has_place']
-            pair_coref = [str(pair_results['coref']), '2']
+            pair_coref = [str(pair_coref_info['coref']), '2']
             if not e_i_has_arg and not e_j_has_arg: # both have no argument
                 both_no.append(pair_coref)
             else:
@@ -86,10 +101,11 @@ def different_has_arg_status_metrics(prompt_type, select_arg_strategy, gold_core
                             one_has_part.append(pair_coref)
                         else:
                             one_has_place.append(pair_coref)
-        for pair_id, pair_results in pred_recognized_event_pairs.items():
+        for pair_id, pair_coref_info in pred_recognized_event_pairs.items():
+            pair_results = event_pair_info[doc_id][pair_id]
             e_i_has_arg = pair_results['e_i_has_part'] or pair_results['e_i_has_place']
             e_j_has_arg = pair_results['e_j_has_part'] or pair_results['e_j_has_place']
-            pair_coref = [str(gold_recognized_event_pairs[pair_id]['coref']), str(pair_results['coref'])]
+            pair_coref = [str(gold_recognized_event_pairs[pair_id]['coref']), str(pair_coref_info['coref'])]
             if not e_i_has_arg and not e_j_has_arg: # both have no argument
                 both_no.append(pair_coref)
             else:
@@ -125,10 +141,11 @@ def different_has_arg_status_metrics(prompt_type, select_arg_strategy, gold_core
                             one_has_part.append(pair_coref)
                         else:
                             one_has_place.append(pair_coref)
-        for pair_id, pair_results in pred_wrong_event_pairs.items():
+        for pair_id, pair_coref_info in pred_wrong_event_pairs.items():
+            pair_results = event_pair_info[doc_id][pair_id]
             e_i_has_arg = pair_results['e_i_has_part'] or pair_results['e_i_has_place']
             e_j_has_arg = pair_results['e_j_has_part'] or pair_results['e_j_has_place']
-            pair_coref = ['0', str(pair_results['coref'])]
+            pair_coref = ['0', str(pair_coref_info['coref'])]
             if not e_i_has_arg and not e_j_has_arg: # both have no argument
                 both_no.append(pair_coref)
             else:
@@ -193,13 +210,138 @@ def different_has_arg_status_metrics(prompt_type, select_arg_strategy, gold_core
     metrics['both_have_unbalance_other'] = classification_report(y_true=y_true, y_pred=y_pred, output_dict=True)['1']
     return metrics
 
-# prompt_type = 'm_ht_hn'
+# prompt_type = 'm_hta_hn'
 # select_arg_strategy = 'no_filter'
 # gold_coref_file = '../../data/test.json'
 # gold_simi_coref_file = '../../data/KnowledgeExtraction/simi_gold_test_related_info_0.75.json'
-# pred_coref_file = '../clustering/event-event/epoch_5_dev_f1_72.9137_weights.bin_longformer_m_ht_hn_test_pred_corefs.json'
+# pred_coref_file = '../clustering/event-event/epoch_5_dev_f1_73.5794_weights.bin_longformer_m_hta_hn_test_pred_corefs.json'
 # pred_simi_coref_file = '../../data/KnowledgeExtraction/simi_epoch_3_test_related_info_0.75.json'
 # print(different_has_arg_status_metrics(prompt_type, select_arg_strategy, gold_coref_file, gold_simi_coref_file, pred_coref_file, pred_simi_coref_file))
+
+# def compare_two_results(prompt_type, select_arg_strategy, gold_coref_file, gold_simi_coref_file, pred_coref_file_1, pred_coref_file_2, pred_simi_coref_file):
+#     gold_coref_results_1, pred_coref_results_1 = get_event_pair_set(prompt_type, select_arg_strategy, gold_coref_file, gold_simi_coref_file, pred_coref_file_1, pred_simi_coref_file)
+#     gold_coref_results_2, pred_coref_results_2 = get_event_pair_set(prompt_type, select_arg_strategy, gold_coref_file, gold_simi_coref_file, pred_coref_file_2, pred_simi_coref_file)
+#     c2w = 
+    
+#     for doc_id in gold_coref_results_1:
+#         gold_recognized_event_pairs_1 = gold_coref_results_1[doc_id]['recognized_event_pairs']
+#         pred_coref_result_dict_1 = pred_coref_results_1[doc_id]
+#         pred_recognized_event_pairs_1, pred_wrong_event_pairs_1 = (
+#             pred_coref_result_dict_1['recognized_event_pairs'], 
+#             pred_coref_result_dict_1['wrong_event_pairs']
+#         )
+#         gold_recognized_event_pairs_2 = gold_coref_results_2[doc_id]['recognized_event_pairs']
+#         pred_coref_result_dict_2 = pred_coref_results_2[doc_id]
+#         pred_recognized_event_pairs_2, pred_wrong_event_pairs_2 = (
+#             pred_coref_result_dict_2['recognized_event_pairs'], 
+#             pred_coref_result_dict_2['wrong_event_pairs']
+#         )
+#         for pair_id in pred_recognized_event_pairs_1:
+#             assert gold_recognized_event_pairs_1[pair_id]['coref'] == gold_recognized_event_pairs_2[pair_id]['coref']
+#             pair_coref_1 = [str(gold_recognized_event_pairs_1[pair_id]['coref']), str(pred_recognized_event_pairs_1[pair_id]['coref'])]
+#             pair_coref_bool_1 = pair_coref_1[0] == pair_coref_1[1]
+#             pair_coref_2 = [str(gold_recognized_event_pairs_2[pair_id]['coref']), str(pred_recognized_event_pairs_2[pair_id]['coref'])]
+#             pair_coref_bool_2 = pair_coref_2[0] == pair_coref_2[1]
+#             info = {
+#                 'e_i': e_i_pretty_sent, 'e_j_pretty_sent': e_j_pretty_sent, 
+#             }
+
+            
+#         for pair_id, pair_results in pred_wrong_event_pairs.items():
+#             e_i_has_arg = pair_results['e_i_has_part'] or pair_results['e_i_has_place']
+#             e_j_has_arg = pair_results['e_j_has_part'] or pair_results['e_j_has_place']
+#             pair_coref = ['0', str(pair_results['coref'])]
+#             if not e_i_has_arg and not e_j_has_arg: # both have no argument
+#                 both_no.append(pair_coref)
+#             else:
+#                 if e_i_has_arg and e_j_has_arg: # both have arguments
+#                     both_have.append(pair_coref)
+#                     if pair_results['e_i_has_part'] and pair_results['e_i_has_place'] and pair_results['e_j_has_part'] and pair_results['e_j_has_place']:
+#                         both_have_part_place.append(pair_coref)
+#                     elif (pair_results['e_i_has_part'] and pair_results['e_j_has_part']) and (not pair_results['e_i_has_place'] and not pair_results['e_j_has_place']):
+#                         both_have_part.append(pair_coref)
+#                     elif (pair_results['e_i_has_place'] and pair_results['e_j_has_place']) and (not pair_results['e_i_has_part'] and not pair_results['e_j_has_part']):
+#                         both_have_place.append(pair_coref)
+#                     else:
+#                         both_have_unbalance.append(pair_coref)
+#                         if pair_results['e_i_has_part'] and pair_results['e_j_has_part']:
+#                             both_have_unbalance_have_part.append(pair_coref)
+#                         elif pair_results['e_i_has_place'] and pair_results['e_j_has_place']:
+#                             both_have_unbalance_have_place.append(pair_coref)
+#                         else:
+#                             both_have_unbalance_other.append(pair_coref)
+#                 else: # one has argument
+#                     one_has.append(pair_coref)
+#                     if e_i_has_arg:
+#                         if pair_results['e_i_has_part'] and pair_results['e_i_has_place']:
+#                             one_has_part_place.append(pair_coref)
+#                         elif pair_results['e_i_has_part']:
+#                             one_has_part.append(pair_coref)
+#                         else:
+#                             one_has_place.append(pair_coref)
+#                     else:
+#                         if pair_results['e_j_has_part'] and pair_results['e_j_has_place']:
+#                             one_has_part_place.append(pair_coref)
+#                         elif pair_results['e_j_has_part']:
+#                             one_has_part.append(pair_coref)
+#                         else:
+#                             one_has_place.append(pair_coref)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 def different_find_arg_status_metrics(gold_coref_file, gold_simi_coref_file, pred_coref_file, pred_simi_coref_file):
     gold_coref_results, pred_coref_results = get_event_pair_set(gold_coref_file, gold_simi_coref_file, pred_coref_file, pred_simi_coref_file)
