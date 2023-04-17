@@ -106,7 +106,7 @@ def get_event_arg_status(prompt_type, e1_related_info, e2_related_info, select_a
         'e2_related_places': e2_related_places
     }
 
-def pretty_event_mention(sentences, sent_idx, sent_offset, trigger, windows=10):
+def pretty_event_mention(sentences, sent_idx, sent_offset, trigger, windows=5):
     before_sentence, after_sentence = '', ''
     for i in range(1,1+windows):
         if sent_idx - i >= 0:
