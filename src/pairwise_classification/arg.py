@@ -7,23 +7,34 @@ def parse_args():
         help="The output directory where the model checkpoints and predictions will be written.",
     )
     parser.add_argument("--train_file", default=None, type=str, required=True, help="The input training file.")
+    parser.add_argument("--train_file_with_cos", default=None, type=str, required=False, help="Input training file with similarities.")
     parser.add_argument("--dev_file", default=None, type=str, required=True, help="The input evaluation file.")
     parser.add_argument("--test_file", default=None, type=str, required=True, help="The input testing file.")
-    parser.add_argument("--train_file_with_cos", default=None, type=str, required=False, help="Input training file with similarities.")
     # using normal/tiny dataset
-    parser.add_argument("--train_data_type", default="normal", type=str, required=True, choices=['normal', 'tiny'])
+    parser.add_argument("--train_data_type", default="tiny", type=str, required=True, choices=['normal', 'tiny'])
     parser.add_argument("--neg_top_k", default="1", type=int, help="select top k non-coref events for each event")
     # whether add special mark around event trigger
     parser.add_argument("--data_include_mark", action="store_true", help="Whether use marks to locate triggers.")
     
     parser.add_argument("--model_type", default="bert", type=str, required=True, choices=['bert', 'roberta', 'longformer'])
-    parser.add_argument("--model_subtype", default="normal_model", type=str, required=True, choices=['normal_model', 'mark_model', 'mask_model'])
     parser.add_argument("--model_checkpoint",
         default="bert-large-cased/", type=str, required=True,
         help="Path to pretrained model or model identifier from huggingface.co/models",
     )
     parser.add_argument("--max_seq_length", default=512, type=int, required=True)
-    parser.add_argument("--matching_style", default="event", type=str, required=False, help="how to construct event-pair feature representation")
+    parser.add_argument("--with_mask", action="store_true", help="Whether to input the mask prompts.")
+    parser.add_argument("--matching_style", default="none", type=str, required=True, 
+        help="incorporate event matching representations", choices=['product', 'cosine', 'product_cosine']
+    )
+    parser.add_argument("--cosine_space_dim", default=64, type=int, required=True, 
+        help="reduce event embedding dimension"
+    )
+    parser.add_argument("--cosine_slices", default=128, type=int, required=True, 
+        help="cosine matching perspectives"
+    )
+    parser.add_argument("--cosine_factor", default=4, type=int, required=True, 
+        help="tensor factorization"
+    )
     
     parser.add_argument("--do_train", action="store_true", help="Whether to run training.")
     parser.add_argument("--do_test", action="store_true", help="Whether to run eval on the test set.")

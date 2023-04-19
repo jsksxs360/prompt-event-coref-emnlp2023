@@ -1,24 +1,27 @@
-from collections import defaultdict
 from torch.utils.data import Dataset, DataLoader
 import json
+from tqdm.auto import tqdm
+from collections import defaultdict
 
 # special tokens
 BERT_SPECIAL_TOKENS= ['[START]', '[END]']
 ROBERTA_SPECIAL_TOKENS = ['<start>', '<end>']
-ADD_MARK_TYPE = ['none', 'bert', 'roberta', 'longformer']
+
+def get_event_cluster_id(event_id:str, clusters:list) -> str:
+    for cluster in clusters:
+        if event_id in cluster['events']:
+            return cluster['hopper_id']
+    raise ValueError(f'Unknown event_id: {event_id}')
 
 class KBPCorefPair(Dataset):
-    def __init__(self, data_file:str, add_mark:str, context_k=1):
-        assert add_mark in ADD_MARK_TYPE
-        self.data = self.load_data(data_file, add_mark, context_k)
-    
-    def _get_event_cluster_id(self, event_id:str, clusters:list) -> str:
-        for cluster in clusters:
-            if event_id in cluster['events']:
-                return cluster['hopper_id']
-        raise ValueError(f'Unknown event_id: {event_id}')
+    def __init__(self, data_file:str, add_mark:bool, model_type:str, tokenizer, max_length:int):
+        self.add_mark = add_mark
+        self.model_type = model_type
+        self.tokenizer = tokenizer
+        self.max_length = max_length
+        self.data = self.load_data(data_file)
 
-    def load_data(self, data_file, add_mark:str, context_k):
+    def load_data(self, data_file):
         Data = []
         with open(data_file, 'rt', encoding='utf-8') as f:
             for line in f:
