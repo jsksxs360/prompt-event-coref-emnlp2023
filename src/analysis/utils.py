@@ -106,7 +106,10 @@ def get_event_arg_status(prompt_type, e1_related_info, e2_related_info, select_a
         'e2_related_places': e2_related_places
     }
 
-def pretty_event_mention(sentences, sent_idx, sent_offset, trigger, windows=5):
+def pretty_event_mention(
+    sentences, sent_idx, sent_offset, trigger, 
+    start_tag='[EVENT]', end_tag='[/EVENT]', windows=2
+    ):
     before_sentence, after_sentence = '', ''
     for i in range(1,1+windows):
         if sent_idx - i >= 0:
@@ -115,10 +118,12 @@ def pretty_event_mention(sentences, sent_idx, sent_offset, trigger, windows=5):
             after_sentence += ' ' + sentences[sent_idx + i]['text']
     sentence = sentences[sent_idx]['text']
     assert sentence[sent_offset:sent_offset + len(trigger)] == trigger
-    mention = "{}{} [START] {} [END] {}{}".format(
+    mention = "{}{}{} {} {}{}{}".format(
         before_sentence, 
         sentence[:sent_offset], 
+        start_tag, 
         trigger, 
+        end_tag, 
         sentence[sent_offset + len(trigger):], 
         after_sentence
     )
