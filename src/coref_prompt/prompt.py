@@ -14,10 +14,13 @@ PROMPT_TYPE = [
     'm_st_hn', 'm_st_hc', 'm_st_hq', 'm_sta_hn', 'm_sta_hc', 'm_sta_hq', 'm_stao_hn', 'm_stao_hc', 'm_stao_hq'
 ]
 WORD_FILTER = set([
-    'i', 'me', 'you', 'he', 'him', 'she', 'her', 'it', 'we', 'us', 'you', 'they', 'them', 'my', 'mine', 'your', 'yours', 'his', 'her', 'hers', 
-    'its', 'our', 'ours', 'their', 'theirs', 'myself', 'yourself', 'himself', 'herself', 'itself', 'ourselves', 'yourselves', 'themselves', 
-    'other', 'others', 'this', 'that', 'these', 'those', 'who', 'whom', 'what', 'whose', 'which', 'that', 'all', 'each', 'either', 'neither', 
-    'one', 'any', 'oneself', 'such', 'same'
+    'you', 'your', 'yours', 'yourself', 'yourselves', 
+    'i', 'me', 'my', 'mine', 'myself', 'we', 'us', 'our', 'ours', 'ourselves', 
+    'he', 'his', 'him', 'himself', 'she', 'her', 'herself', 'hers', 
+    'it', 'its', 'itself', 'they', 'their', 'theirs', 'them', 'themselves', 'other', 'others', 
+    'this', 'that', 'these', 'those', 'who', 'whom', 'what', 'whose', 'which', 'where', 'why', 
+    'that', 'all', 'each', 'either', 'neither', 
+    'one', 'any', 'oneself', 'such', 'same', 'everyone', 'anyone', 'there', 
 ])
 SELECT_ARG_STRATEGY = ['no_filter', 'filter_related_args', 'filter_all']
 EVENT_SUBTYPES = [ # 18 subtypes
@@ -561,45 +564,6 @@ def create_mix_template(
         'special_tokens': special_tokens
     }
 
-# def remove_same_args(args):
-#     added_args, new_args = set(), []
-#     for arg in args:
-#         if arg['mention'] not in added_args:
-#             new_args.append(arg)
-#             added_args.add(arg['mention'])
-#     return new_args
-
-def convert_args_to_str(args:list, use_filter=True):
-    if use_filter:
-        args = filter(lambda x: x['mention'].lower() not in WORD_FILTER, args)
-    arg_str = ''
-    participants, places = (
-        [arg for arg in args if arg['role'] == 'participant'], 
-        [arg for arg in args if arg['role'] == 'place']
-    )
-    # participants = remove_same_args(participants)
-    # places = remove_same_args(places)
-    if len(participants) > 0:
-        participants.sort(key=lambda x: x['global_offset'])
-        arg_str = f"with {', '.join([arg['mention'] for arg in participants])} as participants"
-    if len(places) > 0:
-        places.sort(key=lambda x: x['global_offset'])
-        arg_str += f" at {', '.join([arg['mention'] for arg in places])}"
-    return arg_str.strip()
-
-def convert_related_info_to_str(related_triggers:list, related_args:list, use_filter=True):
-    if use_filter:
-        related_args = list(filter(lambda x: x['mention'].lower() not in WORD_FILTER, related_args))
-    related_str = ''
-    # related_args = remove_same_args(related_args)
-    related_args.sort(key=lambda x: x['global_offset'])
-    if len(related_triggers) > 0:
-        related_str = f"(with related events: {', '.join(set(related_triggers))}"
-        related_str += f", and related participants/places: {', '.join([arg['mention'] for arg in related_args])})" if len(related_args) > 0 else ')'
-    elif len(related_args) > 0:
-        related_str = f"(with related participants/places: {', '.join([arg['mention'] for arg in related_args])})"
-    return related_str.strip()
-
 def findall(p, s):
     '''yields all the positions of
     the pattern p in the string s.'''
@@ -628,31 +592,62 @@ def select_args(my_args, other_related_info, match_other_related_args=True):
         if (arg['role'] == 'participant' and other_has_part) or (arg['role'] == 'place' and other_has_place)
     ]
 
-def create_arg_and_related_info_str(prompt_type, e1_related_info, e2_related_info, select_arg_strategy):
-    if select_arg_strategy == 'filter_all':
-        e1_arg_str, e2_arg_str = (
-            convert_args_to_str(select_args(e1_related_info['arguments'], e2_related_info, 'o' in prompt_type), not prompt_type.startswith('m')), 
-            convert_args_to_str(select_args(e2_related_info['arguments'], e1_related_info, 'o' in prompt_type), not prompt_type.startswith('m'))
+def create_arg_and_related_info_str(prompt_type:str, e1_related_info:dict, e2_related_info:dict, select_arg_strategy:str, s_tokens:dict):
+
+    def convert_args_to_str(args:list, use_filter:bool, soft_prompt:bool):
+        if use_filter:
+            args = filter(lambda x: x['mention'].lower() not in WORD_FILTER, args)
+        if soft_prompt:
+            return f"{s_tokens['l7']} {', '.join([arg['mention'] for arg in args])} {s_tokens['l8']}".strip(), [s_tokens['l7'], s_tokens['l8']]
+        participants, places, unknows = (
+            [arg for arg in args if arg['role'] == 'participant'], 
+            [arg for arg in args if arg['role'] == 'place'], 
+            [arg for arg in args if arg['role'] == 'unk']
         )
-    else:
-        e1_arg_str, e2_arg_str = (
-            convert_args_to_str(e1_related_info['arguments'], not prompt_type.startswith('m')), 
-            convert_args_to_str(e2_related_info['arguments'], not prompt_type.startswith('m'))
-        )
+        arg_str = ''
+        if participants:
+            participants.sort(key=lambda x: x['global_offset'])
+            arg_str = f"with {', '.join([arg['mention'] for arg in participants])} as participants"
+        if places:
+            places.sort(key=lambda x: x['global_offset'])
+            arg_str += f" at {', '.join([arg['mention'] for arg in places])}"
+        if unknows:
+            arg_str += f" (other arguments are {', '.join([arg['mention'] for arg in unknows])})"
+        return arg_str.strip(), []
+
+    def convert_related_info_to_str(related_triggers:list, related_args:list, use_filter:bool, soft_prompt:bool):
+        if use_filter:
+            related_args = list(filter(lambda x: x['mention'].lower() not in WORD_FILTER, related_args))
+        if soft_prompt:
+            return (
+                f"{', '.join([arg['mention'] for arg in related_triggers])} {s_tokens['l9']}" if related_triggers else ""
+                f"{', '.join([arg['mention'] for arg in related_args])} {s_tokens['l10']}" if related_args else ""
+            ).strip(), [s_tokens['l9'], s_tokens['l10']]
+        related_str = ''
+        if related_triggers:
+            related_str = f"(with related events: {', '.join(set(related_triggers))}"
+            related_str += f", and related participants/places: {', '.join([arg['mention'] for arg in related_args])})" if related_args else ')'
+        elif related_args:
+            related_str = f"(with related participants/places: {', '.join([arg['mention'] for arg in related_args])})"
+        return related_str.strip(), []
+
+    special_tokens = []
+    e1_args = select_args(e1_related_info['arguments'], e2_related_info, 'o' in prompt_type) if select_arg_strategy == 'filter_all' else e1_related_info['arguments']
+    e2_args = select_args(e2_related_info['arguments'], e1_related_info, 'o' in prompt_type) if select_arg_strategy == 'filter_all' else e2_related_info['arguments']
+    e1_arg_str, arg_special_tokens = convert_args_to_str(e1_args, not prompt_type.startswith('m'), 's' in prompt_type)
+    e2_arg_str, _ = convert_args_to_str(e2_args, not prompt_type.startswith('m'), 's' in prompt_type)
+    special_tokens += arg_special_tokens
     e1_related_triggers, e2_related_triggers = e1_related_info['related_triggers'], e2_related_info['related_triggers']
     if not e1_related_triggers or not e2_related_triggers:
         e1_related_triggers, e2_related_triggers = [], []
-    if select_arg_strategy in ['filter_all', 'filter_related_args']:
-        e1_related_str, e2_related_str = (
-            convert_related_info_to_str(e1_related_triggers, select_args(e1_related_info['related_arguments'], e2_related_info, 'o' in prompt_type)), 
-            convert_related_info_to_str(e2_related_triggers, select_args(e2_related_info['related_arguments'], e1_related_info, 'o' in prompt_type)), 
-        )
-    else:
-        e1_related_str, e2_related_str = (
-            convert_related_info_to_str(e1_related_triggers, e1_related_info['related_arguments']), 
-            convert_related_info_to_str(e2_related_triggers, e2_related_info['related_arguments']), 
-        )
-    return e1_arg_str, e2_arg_str, e1_related_str, e2_related_str
+    e1_related_args = select_args(e1_related_info['related_arguments'], e2_related_info, 'o' in prompt_type) \
+        if select_arg_strategy in ['filter_all', 'filter_related_args'] else e1_related_info['related_arguments']
+    e2_related_args = select_args(e2_related_info['related_arguments'], e1_related_info, 'o' in prompt_type) \
+        if select_arg_strategy in ['filter_all', 'filter_related_args'] else e2_related_info['related_arguments']
+    e1_related_str, related_special_tokens = convert_related_info_to_str(e1_related_triggers,e1_related_args, True, 's' in prompt_type)
+    e2_related_str, _ = convert_related_info_to_str(e2_related_triggers, e2_related_args, True, 's' in prompt_type)
+    special_tokens += related_special_tokens
+    return e1_arg_str, e2_arg_str, e1_related_str, e2_related_str, set(special_tokens)
 
 def create_prompt(
     e1_sent_idx:int, e1_sent_start:int, e1_trigger:str, e1_related_info: dict, 
@@ -665,10 +660,12 @@ def create_prompt(
     special_token_dict = {
         'mask': '[MASK]', 'e1s': '[E1_START]', 'e1e': '[E1_END]', 'e2s': '[E2_START]', 'e2e': '[E2_END]', 
         'l1': '[L1]', 'l2': '[L2]', 'l3': '[L3]', 'l4': '[L4]', 'l5': '[L5]', 'l6': '[L6]', 
+        'l7': '[L7]', 'l8': '[L8]', 'l9': '[L9]', 'l10': '[L10]', 
         'match': '[MATCH]', 'mismatch': '[MISMATCH]', 'refer': '[REFER_TO]', 'no_refer': '[NOT_REFER_TO]'
     } if model_type == 'bert' else {
         'mask': '<mask>', 'e1s': '<e1_start>', 'e1e': '<e1_end>', 'e2s': '<e2_start>', 'e2e': '<e2_end>', 
         'l1': '<l1>', 'l2': '<l2>', 'l3': '<l3>', 'l4': '<l4>', 'l5': '<l5>', 'l6': '<l6>', 
+        'l7': '<L7>', 'l8': '<L8>', 'l9': '<L9>', 'l10': '<L10>', 
         'match': '<match>', 'mismatch': '<mismatch>', 'refer': '<refer_to>', 'no_refer': '<not_refer_to>'
     }
     for i in range(len(EVENT_SUBTYPES) + 1):
@@ -736,12 +733,12 @@ def create_prompt(
             'trigger_offsets': trigger_offsets
         }
     elif prompt_type.startswith('t'): # knowledge prompt
-        e1_arg_str, e2_arg_str, e1_related_str, e2_related_str = create_arg_and_related_info_str(
-            prompt_type, e1_related_info, e2_related_info, select_arg_strategy
+        e1_arg_str, e2_arg_str, e1_related_str, e2_related_str, special_tokens = create_arg_and_related_info_str(
+            prompt_type, e1_related_info, e2_related_info, select_arg_strategy, special_token_dict
         )
         template_data = create_knowledge_template(e1_trigger, e2_trigger, e1_arg_str, e2_arg_str, e1_related_str, e2_related_str, prompt_type, special_token_dict)
         trigger_offsets = template_data['trigger_offsets']
-        assert set(template_data['special_tokens']).issubset(set(tokenizer.additional_special_tokens))
+        assert set(special_tokens + template_data['special_tokens']).issubset(set(tokenizer.additional_special_tokens))
         template_length = len(tokenizer.tokenize(template_data['template'])) + 3
         context_data = create_event_context(
             e1_sent_idx, e1_sent_start, e1_trigger, 
@@ -807,8 +804,8 @@ def create_prompt(
             'trigger_offsets': trigger_offsets
         }
     elif prompt_type.startswith('m'): # mix prompt
-        e1_arg_str, e2_arg_str, e1_related_str, e2_related_str = create_arg_and_related_info_str(
-            prompt_type, e1_related_info, e2_related_info, select_arg_strategy
+        e1_arg_str, e2_arg_str, e1_related_str, e2_related_str, special_tokens = create_arg_and_related_info_str(
+            prompt_type, e1_related_info, e2_related_info, select_arg_strategy, special_token_dict
         )
         template_data = create_mix_template(e1_trigger, e2_trigger, e1_arg_str, e2_arg_str, e1_related_str, e2_related_str, prompt_type, special_token_dict)
         template_length = (
@@ -819,7 +816,7 @@ def create_prompt(
             6
         )
         trigger_offsets = template_data['prefix_trigger_offsets']
-        assert set(template_data['special_tokens']).issubset(set(tokenizer.additional_special_tokens))
+        assert set(special_tokens + template_data['special_tokens']).issubset(set(tokenizer.additional_special_tokens))
         context_data = create_event_context(
             e1_sent_idx, e1_sent_start, e1_trigger, 
             e2_sent_idx, e2_sent_start, e2_trigger,  
@@ -969,9 +966,11 @@ def get_special_tokens(model_type:str, token_type:str):
     assert token_type in ['base', 'connect', 'match', 'event_subtype']
     if token_type == 'base':
         return [
-            '[E1_START]', '[E1_END]', '[E2_START]', '[E2_END]', '[L1]', '[L2]', '[L3]', '[L4]', '[L5]', '[L6]'
+            '[E1_START]', '[E1_END]', '[E2_START]', '[E2_END]', 
+            '[L1]', '[L2]', '[L3]', '[L4]', '[L5]', '[L6]', '[L7]', '[L8]', '[L9]', '[L10]'
         ] if model_type == 'bert' else [
-            '<e1_start>', '<e1_end>', '<e2_start>', '<e2_end>', '<l1>', '<l2>', '<l3>', '<l4>', '<l5>', '<l6>'
+            '<e1_start>', '<e1_end>', '<e2_start>', '<e2_end>', 
+            '<l1>', '<l2>', '<l3>', '<l4>', '<l5>', '<l6>', '<l7>', '<l8>', '<l9>', '<l10>'
         ]
     elif token_type == 'connect':
         return [

@@ -1,11 +1,12 @@
 from collections import defaultdict
 import json
 
-def get_pred_arguments(arg_file:str) -> dict:
+def get_pred_arguments(arg_file:str, arg_file_type:str) -> dict:
     '''
     # Returns: 
         - argument dictionary: {doc_id: {event_id: [{"global_offset": 798, "mention": "We", "role": "participant"}]}}
     '''
+    assert arg_file_type in ['omni', 'chatgpt']
     participant_roles = set(['defendant', 'entity', 'person', 'position', 'agent', 'attacker', 
                              'giver', 'victim', 'audience', 'recipient', 'target', 'seller', 
                              'beneficiary', 'plaintiff', 'adjudicator', 'org', 'prosecutor'])
@@ -22,6 +23,27 @@ def get_pred_arguments(arg_file:str) -> dict:
                         'role': 'participant' if arg['role'].lower() in participant_roles else 'place'
                     } for arg in event['arguments'] if arg['role'].lower() in participant_roles | place_roles
                 ] 
+                for event in sample['event_args']
+            } if arg_file_type == 'omni' else {
+                event['start']: [
+                    {
+                        'global_offset': -1, 
+                        'mention': arg, 
+                        'role': 'participant'
+                    } for arg in event['participants']
+                ] + [
+                    {
+                        'global_offset': -1, 
+                        'mention': arg, 
+                        'role': 'place'
+                    } for arg in event['locations']
+                ] + [
+                    {
+                        'global_offset': -1, 
+                        'mention': arg, 
+                        'role': 'unk'
+                    } for arg in event['unknow']
+                ]
                 for event in sample['event_args']
             }
     return arg_dict
@@ -50,8 +72,8 @@ def get_event_by_id(event_id, events):
             return e
     return None
 
-def create_simi_event_file(data_file, arg_file, simi_file, save_file, cosine_threshold):
-    doc_arg_dict = get_pred_arguments(arg_file)
+def create_simi_event_file(data_file, arg_file, simi_file, save_file, cosine_threshold, arg_file_type):
+    doc_arg_dict = get_pred_arguments(arg_file, arg_file_type)
     doc_simi_dict = create_event_simi_dict(simi_file, cosine_threshold)
     Results = []
     with open(data_file, 'rt', encoding='utf-8') as f:
@@ -97,8 +119,8 @@ def get_event_by_id_for_testfile(event_id, events):
             return e
     return None
 
-def create_simi_event_file_for_testfile(data_file, arg_file, simi_file, save_file, cosine_threshold):
-    doc_arg_dict = get_pred_arguments(arg_file)
+def create_simi_event_file_for_testfile(data_file, arg_file, simi_file, save_file, cosine_threshold, arg_file_type):
+    doc_arg_dict = get_pred_arguments(arg_file, arg_file_type)
     doc_simi_dict = create_event_simi_dict(simi_file, cosine_threshold)
     Results = []
     with open(data_file, 'rt', encoding='utf-8') as f:
@@ -139,42 +161,50 @@ def create_simi_event_file_for_testfile(data_file, arg_file, simi_file, save_fil
             f.write(json.dumps(example_result) + '\n')
 
 cosine_threshold = 0.9
+arg_file_type = 'chatgpt'
 
 # create_simi_event_file(
 #     '../train_filtered.json', 
-#     'omni_train_pred_args.json', 
+#     f'./argument_files/{arg_file_type}_train_pred_args.json', 
 #     '../train_filtered_with_cos.json', 
-#     f'simi_train_related_info_{cosine_threshold}.json', 
-#     cosine_threshold
+#     f'./simi_files/simi_{arg_file_type}_train_related_info_{cosine_threshold}.json', 
+#     cosine_threshold, 
+#     arg_file_type
 # )
 # create_simi_event_file(
 #     '../dev_filtered.json', 
-#     'omni_dev_pred_args.json', 
+#     f'./argument_files/{arg_file_type}_dev_pred_args.json', 
 #     '../dev_filtered_with_cos.json', 
-#     f'simi_dev_related_info_{cosine_threshold}.json', 
-#     cosine_threshold
+#     f'./simi_files/simi_{arg_file_type}_dev_related_info_{cosine_threshold}.json', 
+#     cosine_threshold, 
+#     arg_file_type
 # )
 # create_simi_event_file(
 #     '../test_filtered.json', 
-#     'omni_gold_test_pred_args.json', 
+#     f'./argument_files/{arg_file_type}_gold_test_pred_args.json', 
 #     '../test_filtered_with_cos.json', 
-#     f'simi_gold_test_related_info_{cosine_threshold}.json', 
-#     cosine_threshold
+#     f'./simi_files/simi_{arg_file_type}_gold_test_related_info_{cosine_threshold}.json', 
+#     cosine_threshold, 
+#     arg_file_type
 # )
 # create_simi_event_file_for_testfile(
 #     '../epoch_3_test_pred_events.json', 
-#     'omni_epoch_3_test_pred_args.json', 
+#     f'./argument_files/{arg_file_type}_epoch_3_test_pred_args.json', 
 #     '../epoch_3_test_pred_events_with_cos.json', 
-#     f'simi_epoch_3_test_related_info_{cosine_threshold}.json', 
-#     cosine_threshold
+#     f'./simi_files/simi_{arg_file_type}_epoch_3_test_related_info_{cosine_threshold}.json', 
+#     cosine_threshold, 
+#     arg_file_type
 # )
 
-def analysis(simi_file):
+def analysis(simi_file, ):
     word_filter = set([
-        'i', 'me', 'you', 'he', 'him', 'she', 'her', 'it', 'we', 'us', 'you', 'they', 'them', 'my', 'mine', 'your', 'yours', 'his', 'her', 'hers', 
-        'its', 'our', 'ours', 'their', 'theirs', 'myself', 'yourself', 'himself', 'herself', 'itself', 'ourselves', 'yourselves', 'themselves', 
-        'other', 'others', 'this', 'that', 'these', 'those', 'who', 'whom', 'what', 'whose', 'which', 'that', 'all', 'each', 'either', 'neither', 
-        'one', 'any', 'oneself', 'such', 'same'
+        'you', 'your', 'yours', 'yourself', 'yourselves', 
+        'i', 'me', 'my', 'mine', 'myself', 'we', 'us', 'our', 'ours', 'ourselves', 
+        'he', 'his', 'him', 'himself', 'she', 'her', 'herself', 'hers', 
+        'it', 'its', 'itself', 'they', 'their', 'theirs', 'them', 'themselves', 'other', 'others', 
+        'this', 'that', 'these', 'those', 'who', 'whom', 'what', 'whose', 'which', 'where', 'why', 
+        'that', 'all', 'each', 'either', 'neither', 
+        'one', 'any', 'oneself', 'such', 'same', 'everyone', 'anyone', 'there', 
     ])
     show = []
     total_event, no_arg_event, find_arg_event = 0, 0, 0
@@ -196,8 +226,8 @@ def analysis(simi_file):
     # for e in show[:3]:
     #     print(e)
 
-analysis(f'simi_train_related_info_{cosine_threshold}.json')
-analysis(f'simi_dev_related_info_{cosine_threshold}.json')
-analysis(f'simi_gold_test_related_info_{cosine_threshold}.json')
-analysis(f'simi_epoch_3_test_related_info_{cosine_threshold}.json')
+# analysis(f'./simi_files/simi_{arg_file_type}_train_related_info_{cosine_threshold}.json')
+# analysis(f'./simi_files/simi_{arg_file_type}_dev_related_info_{cosine_threshold}.json')
+# analysis(f'./simi_files/simi_{arg_file_type}_gold_test_related_info_{cosine_threshold}.json')
+# analysis(f'./simi_files/simi_{arg_file_type}_epoch_3_test_related_info_{cosine_threshold}.json')
 
