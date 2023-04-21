@@ -9,11 +9,9 @@ from sklearn.metrics import classification_report
 import sys
 sys.path.append('../../')
 from src.tools import seed_everything, NpEncoder
-from src.pairwise_test.arg import parse_args
-from src.pairwise_test.data import KBPCorefPair, KBPCorefPairTiny, get_dataLoader
-from src.pairwise_test.data import BERT_SPECIAL_TOKENS, ROBERTA_SPECIAL_TOKENS
-from src.pairwise_test.modeling import BertForPairwiseEC, RobertaForPairwiseEC, LongformerForPairwiseEC
-from src.pairwise_test.modeling import BertForPairwiseECWithMask, RobertaForPairwiseECWithMask, LongformerForPairwiseECWithMask
+from src.pairwise_classification.arg import parse_args
+from src.pairwise_classification.data import KBPCorefPair, KBPCorefPairTiny, get_dataLoader
+from src.pairwise_classification.modeling import BertForPairwiseEC, RobertaForPairwiseEC, LongformerForPairwiseEC
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
                     datefmt='%Y/%m/%d %H:%M:%S',
@@ -25,16 +23,11 @@ MODEL_CLASSES = {
     'roberta': RobertaForPairwiseEC, 
     'longformer': LongformerForPairwiseEC
 }
-MODEL_MASK_CLASSES = {
-    'bert': BertForPairwiseECWithMask,
-    'roberta': RobertaForPairwiseECWithMask, 
-    'longformer': LongformerForPairwiseECWithMask
-}
 
 def to_device(args, batch_data):
     new_batch_data = {}
     for k, v in batch_data.items():
-        if k == 'batch_inputs' or k == 'batch_inputs_with_mask':
+        if k == 'batch_inputs':
             new_batch_data[k] = {
                 k_: v_.to(args.device) for k_, v_ in v.items()
             }
@@ -78,7 +71,7 @@ def test_loop(args, dataloader, model):
             true_labels += [int(label) for label in labels]
     return classification_report(true_labels, true_predictions, output_dict=True)
 
-def train(args, train_dataset, dev_dataset, model, tokenizer, add_mark, collote_fn_type):
+def train(args, train_dataset, dev_dataset, model, tokenizer):
     """ Train the model """
     train_dataloader = get_dataLoader(args, train_dataset, tokenizer, add_mark=add_mark, collote_fn_type=collote_fn_type, shuffle=True)
     dev_dataloader = get_dataLoader(args, dev_dataset, tokenizer, add_mark=add_mark, collote_fn_type=collote_fn_type, shuffle=False)

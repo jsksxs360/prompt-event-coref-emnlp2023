@@ -1,4 +1,4 @@
-export OUTPUT_DIR=./bert_event_results/
+export OUTPUT_DIR=./bert_product_cosine_results/
 
 python3 run_pairwise.py \
     --output_dir=$OUTPUT_DIR \
