@@ -562,9 +562,10 @@ if __name__ == "__main__":
             for doc in Data:
                 f.write(json.dumps(doc, ensure_ascii=False) + '\n')
 
-    # event_argument_extraction('../train_filtered.json', 'omni_train_pred_args.json')
-    # event_argument_extraction('../dev_filtered.json', 'omni_dev_pred_args.json')
-    # event_argument_extraction_for_testfile('../test_filtered.json', '../epoch_3_test_pred_events.json', 'omni_epoch_3_test_pred_args.json')
+    # event_argument_extraction('../train_filtered.json', './argument_files/omni_train_pred_args.json')
+    # event_argument_extraction('../dev_filtered.json', './argument_files/omni_dev_pred_args.json')
+    # event_argument_extraction('../test_filtered.json', './argument_files/omni_gold_test_pred_args.json')
+    # event_argument_extraction_for_testfile('../test_filtered.json', '../epoch_3_test_pred_events.json', './argument_files/omni_epoch_3_test_pred_args.json')
 
     def role_statistics(argument_file):
         role_dict = {}
