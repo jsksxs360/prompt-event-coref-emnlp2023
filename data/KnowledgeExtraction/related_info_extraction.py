@@ -16,34 +16,26 @@ def get_pred_arguments(arg_file:str, arg_file_type:str) -> dict:
         for line in f:
             sample = json.loads(line.strip())
             arg_dict[sample['doc_id']] = {
-                event['start']: [
-                    {
-                        'global_offset': arg['start'], 
-                        'mention': arg['mention'], 
-                        'role': 'participant' if arg['role'].lower() in participant_roles else 'place'
-                    } for arg in event['arguments'] if arg['role'].lower() in participant_roles | place_roles
-                ] 
+                event['start']: [{
+                    'global_offset': arg['start'], 
+                    'mention': arg['mention'], 
+                    'role': 'participant' if arg['role'].lower() in participant_roles else 'place'
+                } for arg in event['arguments'] if arg['role'].lower() in participant_roles | place_roles] 
                 for event in sample['event_args']
             } if arg_file_type == 'omni' else {
-                event['start']: [
-                    {
-                        'global_offset': -1, 
-                        'mention': arg, 
-                        'role': 'participant'
-                    } for arg in event['participants']
-                ] + [
-                    {
-                        'global_offset': -1, 
-                        'mention': arg, 
-                        'role': 'place'
-                    } for arg in event['locations']
-                ] + [
-                    {
-                        'global_offset': -1, 
-                        'mention': arg, 
-                        'role': 'unk'
-                    } for arg in event['unknow']
-                ]
+                event['start']: [{
+                    'global_offset': -1, 
+                    'mention': arg, 
+                    'role': 'participant'
+                } for arg in event['participants']] + [{
+                    'global_offset': -1, 
+                    'mention': arg, 
+                    'role': 'place'
+                } for arg in event['locations']] + [{
+                    'global_offset': -1, 
+                    'mention': arg, 
+                    'role': 'unk'
+                } for arg in event['unknow']]
                 for event in sample['event_args']
             }
     return arg_dict
@@ -230,4 +222,3 @@ def analysis(simi_file, ):
 # analysis(f'./simi_files/simi_{arg_file_type}_dev_related_info_{cosine_threshold}.json')
 # analysis(f'./simi_files/simi_{arg_file_type}_gold_test_related_info_{cosine_threshold}.json')
 # analysis(f'./simi_files/simi_{arg_file_type}_epoch_3_test_related_info_{cosine_threshold}.json')
-
