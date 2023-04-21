@@ -639,12 +639,12 @@ if __name__ == '__main__':
     args.max_seq_length = 512
     args.model_type = 'longformer'
     args.model_checkpoint = '../../PT_MODELS/allenai/longformer-large-4096'
-    args.prompt_type = 'm_htao_hn'
-    args.select_arg_strategy = 'filter_related_args'
+    args.prompt_type = 'm_hta_hn'
+    args.select_arg_strategy = 'no_filter'
     args.with_mask = False
 
     tokenizer = AutoTokenizer.from_pretrained(args.model_checkpoint)
-    base_sp_tokens = ['<e1_start>', '<e1_end>', '<e2_start>', '<e2_end>', '<l1>', '<l2>', '<l3>', '<l4>', '<l5>', '<l6>']
+    base_sp_tokens = ['<e1_start>', '<e1_end>', '<e2_start>', '<e2_end>', '<l1>', '<l2>', '<l3>', '<l4>', '<l5>', '<l6>', '<l7>', '<l8>', '<l9>', '<l10>']
     match_sp_tokens = ['<match>', '<mismatch>']
     connect_tokens = ['<refer_to>', '<not_refer_to>']
     type_sp_tokens = [f'<st_{t_id}>' for t_id in range(len(EVENT_SUBTYPES) + 1)]
@@ -666,7 +666,7 @@ if __name__ == '__main__':
     #     print(train_data[i])
 
     train_small_data = KBPCorefTiny(
-        '../../data/train_filtered.json', '../../data/train_filtered_with_cos.json', '../../data/KnowledgeExtraction/simi_train_related_info_0.75.json', 
+        '../../data/train_filtered.json', '../../data/train_filtered_with_cos.json', '../../data/KnowledgeExtraction/simi_files/simi_chatgpt_train_related_info_0.75.json', 
         neg_top_k=3, prompt_type=args.prompt_type, select_arg_strategy=args.select_arg_strategy, 
         model_type='longformer', tokenizer=tokenizer, max_length=512
     )

@@ -647,7 +647,7 @@ def create_arg_and_related_info_str(prompt_type:str, e1_related_info:dict, e2_re
     e1_related_str, related_special_tokens = convert_related_info_to_str(e1_related_triggers,e1_related_args, True, 's' in prompt_type)
     e2_related_str, _ = convert_related_info_to_str(e2_related_triggers, e2_related_args, True, 's' in prompt_type)
     special_tokens += related_special_tokens
-    return e1_arg_str, e2_arg_str, e1_related_str, e2_related_str, set(special_tokens)
+    return e1_arg_str, e2_arg_str, e1_related_str, e2_related_str, list(set(special_tokens))
 
 def create_prompt(
     e1_sent_idx:int, e1_sent_start:int, e1_trigger:str, e1_related_info: dict, 
