@@ -187,12 +187,16 @@ def get_dataLoader(args, dataset, tokenizer, batch_size=None, shuffle=False):
             # convert char offsets to token idxs
             encoding = tokenizer(sample['text'])
             e1s_idx, e1e_idx, e2s_idx, e2e_idx = (
-                encoding.char_to_token(sample['e1s_offset']), 
+                encoding.char_to_token(sample['e1s_offset']) if encoding.char_to_token(sample['e1s_offset']) else encoding.char_to_token(sample['e1s_offset']+1), 
                 encoding.char_to_token(sample['e1e_offset']), 
-                encoding.char_to_token(sample['e2s_offset']), 
+                encoding.char_to_token(sample['e2s_offset']) if encoding.char_to_token(sample['e2s_offset']) else encoding.char_to_token(sample['e2s_offset']+1), 
                 encoding.char_to_token(sample['e2e_offset'])
             )
-            assert None not in [e1s_idx, e1e_idx, e2s_idx, e2e_idx]
+            assert None not in [e1s_idx, e1e_idx, e2s_idx, e2e_idx], \
+                f"[{sample['text'][sample['e1s_offset']:sample['e1e_offset']+1]}] and " + \
+                f"[{sample['text'][sample['e2s_offset']:sample['e2e_offset']+1]}]" + \
+                str([e1s_idx, e1e_idx, e2s_idx, e2e_idx])
+            assert e1s_idx <= e1e_idx and e2s_idx <= e2e_idx
             batch_e1_idx.append([[e1s_idx, e1e_idx]])
             batch_e2_idx.append([[e2s_idx, e2e_idx]])
             batch_labels.append(int(sample['label']))
@@ -237,15 +241,15 @@ if __name__ == '__main__':
     args = parser.parse_args()
     args.batch_size = 4
     args.max_seq_length = 512
-    args.model_type = 'longformer'
-    args.model_checkpoint = '../../PT_MODELS/allenai/longformer-large-4096'
+    args.model_type = 'roberta'
+    args.model_checkpoint = '../../PT_MODELS/roberta-large/'
     args.data_include_mark = False
 
     tokenizer = AutoTokenizer.from_pretrained(args.model_checkpoint)
-    special_tokens_dict = {
-        'additional_special_tokens': ['<e1_start>', '<e1_end>', '<e2_start>', '<e2_end>']
-    }
-    tokenizer.add_special_tokens(special_tokens_dict)
+    # special_tokens_dict = {
+    #     'additional_special_tokens': ['<e1_start>', '<e1_end>', '<e2_start>', '<e2_end>']
+    # }
+    # tokenizer.add_special_tokens(special_tokens_dict)
 
     # train_data = KBPCorefPair(
     #     '../../data/train_filtered.json', add_mark=args.data_include_mark, 
