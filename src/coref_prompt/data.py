@@ -644,10 +644,16 @@ if __name__ == '__main__':
     args.with_mask = False
 
     tokenizer = AutoTokenizer.from_pretrained(args.model_checkpoint)
-    base_sp_tokens = ['<e1_start>', '<e1_end>', '<e2_start>', '<e2_end>', '<l1>', '<l2>', '<l3>', '<l4>', '<l5>', '<l6>', '<l7>', '<l8>', '<l9>', '<l10>']
-    match_sp_tokens = ['<match>', '<mismatch>']
-    connect_tokens = ['<refer_to>', '<not_refer_to>']
-    type_sp_tokens = [f'<st_{t_id}>' for t_id in range(len(EVENT_SUBTYPES) + 1)]
+    base_sp_tokens = [
+        '[E1_START]', '[E1_END]', '[E2_START]', '[E2_END]', 
+        '[L1]', '[L2]', '[L3]', '[L4]', '[L5]', '[L6]', '[L7]', '[L8]', '[L9]', '[L10]'
+    ] if args.model_type == 'bert' else [
+        '<e1_start>', '<e1_end>', '<e2_start>', '<e2_end>', 
+        '<l1>', '<l2>', '<l3>', '<l4>', '<l5>', '<l6>', '<l7>', '<l8>', '<l9>', '<l10>'
+    ]
+    match_sp_tokens = ['[MATCH]', '[MISMATCH]'] if args.model_type == 'bert' else ['<match>', '<mismatch>']
+    connect_tokens = ['[REFER_TO]', '[NOT_REFER_TO]'] if args.model_type == 'bert' else ['<refer_to>', '<not_refer_to>']
+    type_sp_tokens = [f'[ST_{t_id}]' if args.model_type == 'bert' else f'<st_{t_id}>' for t_id in range(len(EVENT_SUBTYPES) + 1)]
     special_tokens_dict = {
         'additional_special_tokens': base_sp_tokens + match_sp_tokens + connect_tokens + type_sp_tokens
     }
@@ -656,7 +662,7 @@ if __name__ == '__main__':
     # train_data = KBPCoref(
     #     '../../data/train_filtered.json', '../../data/KnowledgeExtraction/simi_train_related_info_0.75.json', 
     #     prompt_type=args.select_arg_strategy, select_arg_strategy=args.select_arg_strategy, 
-    #     model_type='longformer', tokenizer=tokenizer, max_length=512
+    #     model_type=args.model_type, tokenizer=tokenizer, max_length=args.max_seq_length
     # )
     # print_data_statistic('../../data/train_filtered.json')
     # print(len(train_data))
@@ -666,20 +672,23 @@ if __name__ == '__main__':
     #     print(train_data[i])
 
     train_small_data = KBPCorefTiny(
-        '../../data/train_filtered.json', '../../data/train_filtered_with_cos.json', '../../data/KnowledgeExtraction/simi_files/simi_chatgpt_train_related_info_0.75.json', 
+        '../../data/train_filtered.json', 
+        '../../data/train_filtered_with_cos.json', 
+        '../../data/KnowledgeExtraction/simi_files/simi_chatgpt_train_related_info_0.75.json', 
         neg_top_k=3, prompt_type=args.prompt_type, select_arg_strategy=args.select_arg_strategy, 
-        model_type='longformer', tokenizer=tokenizer, max_length=512
+        model_type=args.model_type, tokenizer=tokenizer, max_length=args.max_seq_length
     )
     print_data_statistic('../../data/train_filtered_with_cos.json')
     print(len(train_small_data))
     labels = [train_small_data[s_idx]['label'] for s_idx in range(len(train_small_data))]
     print('Coref:', labels.count(1), 'non-Coref:', labels.count(0))
-    for i in range(10):
+    for i in range(5):
         print(train_small_data[i])
     
     verbalizer = {
         'coref': {
-            'token': '<refer_to>', 'id': tokenizer.convert_tokens_to_ids('<refer_to>'), 
+            'token': '[REFER_TO]' if args.model_type == 'bert' else '<refer_to>', 
+            'id': tokenizer.convert_tokens_to_ids('[REFER_TO]' if args.model_type == 'bert' else '<refer_to>'), 
             'description': 'refer to'
         } if 'c' in args.prompt_type else {
             'token': 'yes', 'id': tokenizer.convert_tokens_to_ids('yes')
@@ -687,15 +696,24 @@ if __name__ == '__main__':
             'token': 'same', 'id': tokenizer.convert_tokens_to_ids('same')
         } , 
         'non-coref': {
-            'token': '<not_refer_to>', 'id': tokenizer.convert_tokens_to_ids('<not_refer_to>'), 
+            'token': '[NOT_REFER_TO]' if args.model_type == 'bert' else '<not_refer_to>', 
+            'id': tokenizer.convert_tokens_to_ids('[NOT_REFER_TO]' if args.model_type == 'bert' else '<not_refer_to>'), 
             'description': 'not refer to'
         } if 'c' in args.prompt_type else {
             'token': 'no', 'id': tokenizer.convert_tokens_to_ids('no')
         } if 'q' in args.prompt_type else {
             'token': 'different', 'id': tokenizer.convert_tokens_to_ids('different')
         }, 
-        'match': {'token': '<match>', 'id': tokenizer.convert_tokens_to_ids('<match>')}, 
-        'mismatch': {'token': '<mismatch>', 'id': tokenizer.convert_tokens_to_ids('<mismatch>')}
+        'match': {
+            'token': '[MATCH]' if args.model_type == 'bert' else '<match>', 
+            'id': tokenizer.convert_tokens_to_ids('[MATCH]' if args.model_type == 'bert' else '<match>'), 
+            'description': 'same related relevant similar matching matched'
+        }, 
+        'mismatch': {
+            'token': '[MISMATCH]' if args.model_type == 'bert' else '<mismatch>', 
+            'id': tokenizer.convert_tokens_to_ids('[MISMATCH]' if args.model_type == 'bert' else '<mismatch>'), 
+            'description': 'different unrelated irrelevant dissimilar mismatched'
+        }
     }
     for subtype, s_id in subtype2id.items():
         verbalizer[subtype] = {'token': f'<st_{s_id}>', 'id': tokenizer.convert_tokens_to_ids(f'<st_{s_id}>')}

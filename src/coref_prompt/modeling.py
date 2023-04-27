@@ -156,14 +156,14 @@ class RobertaForBasePrompt(RobertaPreTrainedModel):
         self.lm_head.decoder = new_embeddings
     
     def _matching_func(self, batch_event_1_reps, batch_event_2_reps):
-        if self.matching_style == 'multi':
+        if self.matching_style == 'product':
             batch_e1_e2_match = batch_event_1_reps * batch_event_2_reps
         elif self.matching_style == 'cosine':
             batch_e1_e2_match = multi_perspective_cosine(
                 self.cosine_ffnn, self.cosine_mat_p, self.cosine_mat_q, 
                 batch_event_1_reps, batch_event_2_reps
             )
-        elif self.matching_style == 'multi_cosine':
+        elif self.matching_style == 'product_cosine':
             batch_e1_e2_product = batch_event_1_reps * batch_event_2_reps
             batch_multi_cosine = multi_perspective_cosine(
                 self.cosine_ffnn, self.cosine_mat_p, self.cosine_mat_q, 
@@ -797,14 +797,14 @@ class RobertaForMixPrompt(RobertaPreTrainedModel):
         self.lm_head.decoder = new_embeddings
     
     def _matching_func(self, batch_event_1_reps, batch_event_2_reps):
-        if self.matching_style == 'multi':
+        if self.matching_style == 'product':
             batch_e1_e2_match = batch_event_1_reps * batch_event_2_reps
         elif self.matching_style == 'cosine':
             batch_e1_e2_match = multi_perspective_cosine(
                 self.cosine_ffnn, self.cosine_mat_p, self.cosine_mat_q, 
                 batch_event_1_reps, batch_event_2_reps
             )
-        elif self.matching_style == 'multi_cosine':
+        elif self.matching_style == 'product_cosine':
             batch_e1_e2_product = batch_event_1_reps * batch_event_2_reps
             batch_multi_cosine = multi_perspective_cosine(
                 self.cosine_ffnn, self.cosine_mat_p, self.cosine_mat_q, 
