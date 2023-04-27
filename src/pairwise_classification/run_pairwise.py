@@ -326,7 +326,7 @@ if __name__ == '__main__':
                         "pred_label": preds, 
                         "pred_prob": probs
                     })
-            save_name = f'_{args.model_type}_{args.prompt_type}_test_pred_corefs.json'
+            save_name = f'_{args.model_type}_test_pred_corefs.json'
             with open(os.path.join(args.output_dir, best_save_weight + save_name), 'wt', encoding='utf-8') as f:
                 for example_result in results:
                     f.write(json.dumps(example_result) + '\n')
