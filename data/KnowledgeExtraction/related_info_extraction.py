@@ -6,7 +6,7 @@ def get_pred_arguments(arg_file:str, arg_file_type:str) -> dict:
     # Returns: 
         - argument dictionary: {doc_id: {event_id: [{"global_offset": 798, "mention": "We", "role": "participant"}]}}
     '''
-    assert arg_file_type in ['omni', 'chatgpt']
+    assert arg_file_type in ['omni', 'chatgpt', 'chatgpt3.5']
     participant_roles = set(['defendant', 'entity', 'person', 'position', 'agent', 'attacker', 
                              'giver', 'victim', 'audience', 'recipient', 'target', 'seller', 
                              'beneficiary', 'plaintiff', 'adjudicator', 'org', 'prosecutor'])
@@ -31,11 +31,11 @@ def get_pred_arguments(arg_file:str, arg_file_type:str) -> dict:
                     'global_offset': -1, 
                     'mention': arg, 
                     'role': 'place'
-                } for arg in event['locations']] + [{
+                } for arg in event['locations']] + ([{
                     'global_offset': -1, 
                     'mention': arg, 
                     'role': 'unk'
-                } for arg in event['unknow']]
+                } for arg in event['unknow']] if 'unknow' in event else [])
                 for event in sample['event_args']
             }
     return arg_dict
@@ -152,8 +152,8 @@ def create_simi_event_file_for_testfile(data_file, arg_file, simi_file, save_fil
         for example_result in Results:
             f.write(json.dumps(example_result) + '\n')
 
-cosine_threshold = 0.9
-arg_file_type = 'chatgpt'
+cosine_threshold = 0.75
+arg_file_type = 'chatgpt3.5'
 
 # create_simi_event_file(
 #     '../train_filtered.json', 

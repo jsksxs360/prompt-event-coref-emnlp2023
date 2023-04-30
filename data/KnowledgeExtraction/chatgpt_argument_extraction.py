@@ -6,23 +6,30 @@ import time
 import re
 
 openai.api_key = "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"
-START_TAG, END_TAG = '[EVENT]', '[/EVENT]'
+START_TAG, END_TAG = '<EVENT>', '</EVENT>'
 WINDOWS = 5
 
 def get_argument_info(pretty_event_mention, trigger, start_tag, end_tag):
-    time.sleep(1)
+    time.sleep(0.05)
     event = f'{start_tag} {trigger} {end_tag}'
     assert event in pretty_event_mention
-    prefix = f'In the following document, please focus on the event {event}: '
+    prefix = (
+        f'In the given document, please focus on the possible event labeled as {event} and extract its corresponding participants and locations. '
+        f"All extracted items must be directly related to {event}, all the other entities should be excluded. "
+        f"If {event} is not an event, answer: none. The given document is: "
+    )
     instruction = (
-        f'Please extract the participants and locations of the event {event} '
-        'in the above document. Respond in the form of a list:'
+        f"Please extract the directly related participants and locations of {event} from the above document without rephrasing. "
+        "Respond in the form of a list: - Participants: 'participant 1', 'participant 2'...\n-Locations: 'location 1', 'location 2'..."
+        f"\nIf participants or locations of {event} do not exist in the above document, the corresponding list item is none. "
+        "Do not interpret the extracted information. Keep the answer short and concise."   
     )
     prompt = prefix + pretty_event_mention + '\n' + instruction
     response = openai.ChatCompletion.create(
         model="gpt-3.5-turbo",
         messages=[
-            {"role": "system", "content": prompt}
+            {"role": "system", "content": "You are an expert in event information extraction."},
+            {"role": "user", "content": prompt}
         ],
         temperature=0
     )
@@ -31,7 +38,7 @@ def get_argument_info(pretty_event_mention, trigger, start_tag, end_tag):
 
 def pretty_event_mention(
     sentences, sent_idx, sent_offset, trigger, 
-    start_tag='[EVENT]', end_tag='[/EVENT]', windows=5
+    start_tag, end_tag, windows
     ):
     before_sentence, after_sentence = '', ''
     for i in range(1,1+windows):
@@ -141,7 +148,7 @@ def event_argument_extraction_for_testfile(gold_test_file, pred_event_file, save
 
 # while True:
 #     try:
-#         status = event_argument_extraction('../train_filtered.json', './argument_files/chatgpt_train_pred_args.json')
+#         status = event_argument_extraction('../train_filtered.json', './argument_files/chatgpt3.5_train_pred_args.json')
 #         if status:
 #             break
 #     except Exception as ex:
@@ -149,7 +156,7 @@ def event_argument_extraction_for_testfile(gold_test_file, pred_event_file, save
 #         time.sleep(30)
 # while True:
 #     try:
-#         status = event_argument_extraction('../dev_filtered.json', './argument_files/chatgpt_dev_pred_args.json')
+#         status = event_argument_extraction('../dev_filtered.json', './argument_files/chatgpt3.5_dev_pred_args.json')
 #         if status:
 #             break
 #     except Exception as ex:
@@ -157,7 +164,7 @@ def event_argument_extraction_for_testfile(gold_test_file, pred_event_file, save
 #         time.sleep(30)
 # while True:
 #     try:
-#         status = event_argument_extraction('../test_filtered.json', './argument_files/chatgpt_gold_test_pred_args.json')
+#         status = event_argument_extraction('../test_filtered.json', './argument_files/chatgpt3.5_gold_test_pred_args.json')
 #         if status:
 #             break
 #     except Exception as ex:
@@ -165,7 +172,7 @@ def event_argument_extraction_for_testfile(gold_test_file, pred_event_file, save
 #         time.sleep(30)
 # while True:
 #     try:
-#         status = event_argument_extraction_for_testfile('../test_filtered.json', '../epoch_3_test_pred_events.json', './argument_files/chatgpt_epoch_3_test_pred_args.json')
+#         status = event_argument_extraction_for_testfile('../test_filtered.json', '../epoch_3_test_pred_events.json', './argument_files/chatgpt3.5_epoch_3_test_pred_args.json')
 #         if status:
 #             break
 #     except Exception as ex:
@@ -191,8 +198,11 @@ def parsing(chatgpt_res, start_tag, end_tag, max_length):
             return False, ''
     
     res_lines = chatgpt_res.split('\n')
-    flag, participants, locations, unknow = '', [], [], []
-    filter_words = set(['no', 'not', 'none', 'unidentified', 'unknown', 'unknow', 'event:', 'events:'])
+    flag, participants, locations = '', [], []
+    filter_words = set([
+        'no', 'not', 'none', 'none.', 'unidentified', 'unidentified.', 
+        'unknown', 'unknown.', 'unknow', 'unknow.', 'event:', 'events:'
+    ])
     filter_spans = set([start_tag.lower(), end_tag.lower(), '@', '.com', '.net', '.org'])
     for line in res_lines:
         line = line.strip()
@@ -254,11 +264,11 @@ def parsing(chatgpt_res, start_tag, end_tag, max_length):
                 item = line[2:]
                 should_add, new_item = check_arg(item, max_length)
                 if should_add:
-                    (
-                        participants if flag == 'part' else \
-                        locations if flag == 'loc' else unknow
-                    ).append(new_item)
-    return participants, locations, unknow
+                    if flag == 'part':
+                        participants.append(new_item)
+                    elif flag == 'loc':
+                        locations.append(new_item)
+    return participants, locations
 
 def parse_arg_file(chatgpt_result_file, start_tag, end_tag, max_length=15):
     Data = []
@@ -267,35 +277,17 @@ def parse_arg_file(chatgpt_result_file, start_tag, end_tag, max_length=15):
             Data.append(json.loads(line.strip()))
     for data in Data:
         for event in data['event_args']:
-            participants, locations, unknow = parsing(
+            participants, locations = parsing(
                 event['chatgpt_res'], start_tag, end_tag, max_length
             )
             event['participants'] = participants
             event['locations'] = locations
-            event['unknow'] = unknow
     os.remove(chatgpt_result_file)
     with open(chatgpt_result_file, 'wt') as f_out:
         for doc in Data:
             f_out.write(json.dumps(doc, ensure_ascii=False) + '\n')
 
-# participants, locations, unknow = parsing(
-#     '- Event: Building\n- Participants: Not specified\n- Location: Not specified, but implied to be in New York City (NYC)', 
-#     START_TAG, END_TAG, 15
-# )
-# print('participants:', participants)
-# print('locations:', locations)
-# print('unknow:', unknow)
-
-parse_arg_file('./argument_files/chatgpt_train_pred_args.json', start_tag=START_TAG, end_tag=END_TAG)
-parse_arg_file('./argument_files/chatgpt_dev_pred_args.json', start_tag=START_TAG, end_tag=END_TAG)
-parse_arg_file('./argument_files/chatgpt_gold_test_pred_args.json', start_tag=START_TAG, end_tag=END_TAG)
-parse_arg_file('./argument_files/chatgpt_epoch_3_test_pred_args.json', start_tag=START_TAG, end_tag=END_TAG)
-
-# with open('chatgpt_train_pred_args.json', 'rt') as f_in:
-#     for line in tqdm(f_in.readlines()):
-#         data = json.loads(line.strip())
-#         for event in data['event_args']:
-#             if event['unknow']:
-#                 print('-'*20, '\n', event['unknow'])
-#                 print('part:', event['participants'])
-#                 print('loc:', event['locations'])
+# parse_arg_file('./argument_files/chatgpt3.5_train_pred_args.json', start_tag=START_TAG, end_tag=END_TAG)
+# parse_arg_file('./argument_files/chatgpt3.5_dev_pred_args.json', start_tag=START_TAG, end_tag=END_TAG)
+# parse_arg_file('./argument_files/chatgpt3.5_gold_test_pred_args.json', start_tag=START_TAG, end_tag=END_TAG)
+# parse_arg_file('./argument_files/chatgpt3.5_epoch_3_test_pred_args.json', start_tag=START_TAG, end_tag=END_TAG)
