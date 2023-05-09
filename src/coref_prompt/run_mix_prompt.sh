@@ -14,11 +14,12 @@ python3 run_mix_prompt.py \
     --train_file_with_cos=../../data/train_filtered_with_cos.json \
     --dev_file=../../data/dev_filtered.json \
     --test_file=../../data/test_filtered.json \
-    --train_simi_file=../../data/KnowledgeExtraction/simi_train_related_info_0.75.json \
-    --dev_simi_file=../../data/KnowledgeExtraction/simi_dev_related_info_0.75.json \
-    --test_simi_file=../../data/KnowledgeExtraction/simi_gold_test_related_info_0.75.json \
-    --pred_test_simi_file=../../data/KnowledgeExtraction/simi_epoch_3_test_related_info_0.75.json \
+    --train_simi_file=../../data/KnowledgeExtraction/simi_files/simi_omni_train_related_info_0.75.json \
+    --dev_simi_file=../../data/KnowledgeExtraction/simi_files/simi_omni_dev_related_info_0.75.json \
+    --test_simi_file=../../data/KnowledgeExtraction/simi_files/simi_omni_gold_test_related_info_0.75.json \
+    --pred_test_simi_file=../../data/KnowledgeExtraction/simi_files/simi_omni_epoch_3_test_related_info_0.75.json \
     --train_data_type=tiny \
+    --sample_strategy=nearmiss \
     --neg_top_k=3 \
     --max_seq_length=512 \
     --learning_rate=1e-5 \

@@ -1,6 +1,7 @@
 from torch.utils.data import Dataset, DataLoader
 import json
 from tqdm.auto import tqdm
+import numpy as np
 from collections import defaultdict
 from prompt import PROMPT_TYPE, SELECT_ARG_STRATEGY, EVENT_SUBTYPES, subtype2id, id2subtype
 from prompt import create_prompt
@@ -121,24 +122,31 @@ def get_noncoref_ids(simi_list, top_k):
                 break
     return noncoref_ids
 
+should_remove = lambda simi_list, top_k: len(set([simi['coref'] for simi in simi_list[:top_k]])) == 1
+
 class KBPCorefTiny(Dataset):
-    def __init__(self, data_file:str, data_file_with_cos:str, simi_file:str, neg_top_k:int, 
-                 prompt_type:str, select_arg_strategy:str, model_type:str, tokenizer, max_length:int):
+    def __init__(self, data_file:str, data_file_with_cos:str, simi_file:str, 
+        prompt_type:str, select_arg_strategy:str, model_type:str, tokenizer, max_length:int, 
+        sample_strategy:str, neg_top_k:int, rand_seed:int=42
+        ):
         '''
         - data_file: source train data file
         - data_file_with_cos: train data file with event similarities
         '''
         assert prompt_type in PROMPT_TYPE and select_arg_strategy in SELECT_ARG_STRATEGY and model_type in ['bert', 'roberta', 'longformer']
+        assert sample_strategy in ['random', 'nearmiss', 'nearneighbour']
         assert neg_top_k > 0
+        np.random.seed(rand_seed)
         self.model_type = model_type
         self.tokenizer = tokenizer
         self.max_length = max_length
+        self.sample_strategy = sample_strategy
         self.related_dict = get_pred_related_info(simi_file)
         self.data = self.load_data(data_file, data_file_with_cos, neg_top_k, prompt_type, select_arg_strategy)
     
     def load_data(self, data_file, data_file_with_cos, neg_top_k, prompt_type:str, select_arg_strategy:str):
         Data = []
-        with open(data_file, 'rt', encoding='utf-8') as f, open(data_file_with_cos, 'rt', encoding='utf-8') as f_cos:
+        with open(data_file, 'rt', encoding='utf-8') as f, open(data_file_with_cos, 'rt', encoding='utf-8') as f_cos: 
             # positive samples (coref pairs)
             for line in tqdm(f.readlines()): 
                 sample = json.loads(line.strip())
@@ -185,51 +193,158 @@ class KBPCorefTiny(Dataset):
                                 'label': 1
                             })
             # negtive samples (non-coref pairs)
-            for line in tqdm(f_cos.readlines()):
-                sample = json.loads(line.strip())
-                clusters = sample['clusters']
-                sentences = sample['sentences']
-                sentences_lengths = [len(self.tokenizer.tokenize(sent['text'])) for sent in sentences]
-                event_simi_dict = create_event_simi_dict(sample['event_pairs_id'], sample['event_pairs_cos'], clusters)
-                events_list, events_dict = sample['events'], {e['event_id']:e for e in sample['events']}
-                for i in range(len(events_list)):
-                    event_1 = events_list[i]
-                    noncoref_event_ids = get_noncoref_ids(event_simi_dict[event_1['event_id']], top_k=neg_top_k)
-                    for e_id in noncoref_event_ids: # non-coref
-                        event_2 = events_dict[e_id]
-                        if event_1['start'] < event_2['start']:
+            if self.sample_strategy == 'random':
+                doc_sent_dict, doc_sent_len_dict = {}, {}
+                all_nocoref_event_pairs = []
+                f.seek(0)
+                for line in tqdm(f.readlines()): 
+                    sample = json.loads(line.strip())
+                    clusters = sample['clusters']
+                    doc_sent_dict[sample['doc_id']] = sample['sentences']
+                    doc_sent_len_dict[sample['doc_id']] = [
+                        len(self.tokenizer.tokenize(sent['text'])) for sent in sample['sentences']
+                    ]
+                    events = sample['events']
+                    for i in range(len(events) - 1):
+                        for j in range(i + 1, len(events)):
+                            event_1, event_2 = events[i], events[j]
+                            event_1_cluster_id = get_event_cluster_id(event_1['event_id'], clusters)
+                            event_2_cluster_id = get_event_cluster_id(event_2['event_id'], clusters)
                             event_1_related_info = self.related_dict[sample['doc_id']][event_1['start']]
                             event_2_related_info = self.related_dict[sample['doc_id']][event_2['start']]
-                            prompt_data = create_prompt(
-                                event_1['sent_idx'], event_1['sent_start'], event_1['trigger'], event_1_related_info, 
-                                event_2['sent_idx'], event_2['sent_start'], event_2['trigger'], event_2_related_info, 
-                                sentences, sentences_lengths, 
-                                prompt_type, select_arg_strategy, 
-                                self.model_type, self.tokenizer, self.max_length
-                            )
-                            Data.append({
-                                'id': sample['doc_id'], 
-                                'prompt': prompt_data['prompt'], 
-                                'mask_offset': prompt_data['mask_offset'], 
-                                'type_match_mask_offset': prompt_data['type_match_mask_offset'], 
-                                'arg_match_mask_offset': prompt_data['arg_match_mask_offset'], 
-                                'trigger_offsets': prompt_data['trigger_offsets'], 
-                                'e1_id': event_1['start'], # event1
-                                'e1_trigger': event_1['trigger'], 
-                                'e1_subtype': event_1['subtype'] if event_1['subtype'] in EVENT_SUBTYPES else 'normal', 
-                                'e1_subtype_id': subtype2id.get(event_1['subtype'], 0), # 0 - 'other'
-                                'e1s_offset': prompt_data['e1s_offset'], 
-                                'e1e_offset': prompt_data['e1e_offset'], 
-                                'e1_type_mask_offset': prompt_data['e1_type_mask_offset'], 
-                                'e2_id': event_2['start'], # event2
-                                'e2_trigger': event_2['trigger'], 
-                                'e2_subtype': event_2['subtype'] if event_2['subtype'] in EVENT_SUBTYPES else 'normal', 
-                                'e2_subtype_id': subtype2id.get(event_2['subtype'], 0), # 0 - 'other'
-                                'e2s_offset': prompt_data['e2s_offset'], 
-                                'e2e_offset': prompt_data['e2e_offset'], 
-                                'e2_type_mask_offset': prompt_data['e2_type_mask_offset'], 
-                                'label': 0
-                            })
+                            if event_1_cluster_id != event_2_cluster_id:
+                                all_nocoref_event_pairs.append((
+                                    sample['doc_id'], event_1, event_2, event_1_related_info, event_2_related_info
+                                ))
+                for choose_idx in np.random.choice(np.random.permutation(len(all_nocoref_event_pairs)), len(Data), replace=False):
+                    doc_id, event_1, event_2, event_1_related_info, event_2_related_info = all_nocoref_event_pairs[choose_idx]
+                    prompt_data = create_prompt(
+                        event_1['sent_idx'], event_1['sent_start'], event_1['trigger'], event_1_related_info, 
+                        event_2['sent_idx'], event_2['sent_start'], event_2['trigger'], event_2_related_info, 
+                        doc_sent_dict[doc_id], doc_sent_len_dict[doc_id], 
+                        prompt_type, select_arg_strategy, 
+                        self.model_type, self.tokenizer, self.max_length
+                    )
+                    Data.append({
+                        'id': doc_id, 
+                        'prompt': prompt_data['prompt'], 
+                        'mask_offset': prompt_data['mask_offset'], 
+                        'type_match_mask_offset': prompt_data['type_match_mask_offset'], 
+                        'arg_match_mask_offset': prompt_data['arg_match_mask_offset'], 
+                        'trigger_offsets': prompt_data['trigger_offsets'], 
+                        'e1_id': event_1['start'], # event1
+                        'e1_trigger': event_1['trigger'], 
+                        'e1_subtype': event_1['subtype'] if event_1['subtype'] in EVENT_SUBTYPES else 'normal', 
+                        'e1_subtype_id': subtype2id.get(event_1['subtype'], 0), # 0 - 'other'
+                        'e1s_offset': prompt_data['e1s_offset'], 
+                        'e1e_offset': prompt_data['e1e_offset'], 
+                        'e1_type_mask_offset': prompt_data['e1_type_mask_offset'], 
+                        'e2_id': event_2['start'], # event2
+                        'e2_trigger': event_2['trigger'], 
+                        'e2_subtype': event_2['subtype'] if event_2['subtype'] in EVENT_SUBTYPES else 'normal', 
+                        'e2_subtype_id': subtype2id.get(event_2['subtype'], 0), # 0 - 'other'
+                        'e2s_offset': prompt_data['e2s_offset'], 
+                        'e2e_offset': prompt_data['e2e_offset'], 
+                        'e2_type_mask_offset': prompt_data['e2_type_mask_offset'], 
+                        'label': 0
+                    })
+            elif self.sample_strategy == 'nearmiss':
+                for line in tqdm(f_cos.readlines()):
+                    sample = json.loads(line.strip())
+                    clusters = sample['clusters']
+                    sentences = sample['sentences']
+                    sentences_lengths = [len(self.tokenizer.tokenize(sent['text'])) for sent in sentences]
+                    event_simi_dict = create_event_simi_dict(sample['event_pairs_id'], sample['event_pairs_cos'], clusters)
+                    events_list, events_dict = sample['events'], {e['event_id']:e for e in sample['events']}
+                    for i in range(len(events_list)):
+                        event_1 = events_list[i]
+                        noncoref_event_ids = get_noncoref_ids(event_simi_dict[event_1['event_id']], top_k=neg_top_k)
+                        for e_id in noncoref_event_ids: # non-coref
+                            event_2 = events_dict[e_id]
+                            if event_1['start'] < event_2['start']:
+                                event_1_related_info = self.related_dict[sample['doc_id']][event_1['start']]
+                                event_2_related_info = self.related_dict[sample['doc_id']][event_2['start']]
+                                prompt_data = create_prompt(
+                                    event_1['sent_idx'], event_1['sent_start'], event_1['trigger'], event_1_related_info, 
+                                    event_2['sent_idx'], event_2['sent_start'], event_2['trigger'], event_2_related_info, 
+                                    sentences, sentences_lengths, 
+                                    prompt_type, select_arg_strategy, 
+                                    self.model_type, self.tokenizer, self.max_length
+                                )
+                                Data.append({
+                                    'id': sample['doc_id'], 
+                                    'prompt': prompt_data['prompt'], 
+                                    'mask_offset': prompt_data['mask_offset'], 
+                                    'type_match_mask_offset': prompt_data['type_match_mask_offset'], 
+                                    'arg_match_mask_offset': prompt_data['arg_match_mask_offset'], 
+                                    'trigger_offsets': prompt_data['trigger_offsets'], 
+                                    'e1_id': event_1['start'], # event1
+                                    'e1_trigger': event_1['trigger'], 
+                                    'e1_subtype': event_1['subtype'] if event_1['subtype'] in EVENT_SUBTYPES else 'normal', 
+                                    'e1_subtype_id': subtype2id.get(event_1['subtype'], 0), # 0 - 'other'
+                                    'e1s_offset': prompt_data['e1s_offset'], 
+                                    'e1e_offset': prompt_data['e1e_offset'], 
+                                    'e1_type_mask_offset': prompt_data['e1_type_mask_offset'], 
+                                    'e2_id': event_2['start'], # event2
+                                    'e2_trigger': event_2['trigger'], 
+                                    'e2_subtype': event_2['subtype'] if event_2['subtype'] in EVENT_SUBTYPES else 'normal', 
+                                    'e2_subtype_id': subtype2id.get(event_2['subtype'], 0), # 0 - 'other'
+                                    'e2s_offset': prompt_data['e2s_offset'], 
+                                    'e2e_offset': prompt_data['e2e_offset'], 
+                                    'e2_type_mask_offset': prompt_data['e2_type_mask_offset'], 
+                                    'label': 0
+                                })
+            elif self.sample_strategy == 'nearneighbour':
+                for line in tqdm(f_cos.readlines()):
+                    sample = json.loads(line.strip())
+                    clusters = sample['clusters']
+                    sentences = sample['sentences']
+                    sentences_lengths = [len(self.tokenizer.tokenize(sent['text'])) for sent in sentences]
+                    event_simi_dict = create_event_simi_dict(sample['event_pairs_id'], sample['event_pairs_cos'], clusters)
+                    events = sample['events']
+                    for i in range(len(events) - 1):
+                        for j in range(i + 1, len(events)):
+                            event_1, event_2 = events[i], events[j]
+                            if (
+                                should_remove(event_simi_dict[event_1['event_id']], top_k=neg_top_k) or 
+                                should_remove(event_simi_dict[event_2['event_id']], top_k=neg_top_k)
+                            ):
+                                continue
+                            event_1_cluster_id = get_event_cluster_id(event_1['event_id'], clusters)
+                            event_2_cluster_id = get_event_cluster_id(event_2['event_id'], clusters)
+                            event_1_related_info = self.related_dict[sample['doc_id']][event_1['start']]
+                            event_2_related_info = self.related_dict[sample['doc_id']][event_2['start']]
+                            if event_1_cluster_id != event_2_cluster_id:
+                                prompt_data = create_prompt(
+                                    event_1['sent_idx'], event_1['sent_start'], event_1['trigger'], event_1_related_info, 
+                                    event_2['sent_idx'], event_2['sent_start'], event_2['trigger'], event_2_related_info, 
+                                    sentences, sentences_lengths, 
+                                    prompt_type, select_arg_strategy, 
+                                    self.model_type, self.tokenizer, self.max_length
+                                )
+                                Data.append({
+                                    'id': sample['doc_id'], 
+                                    'prompt': prompt_data['prompt'], 
+                                    'mask_offset': prompt_data['mask_offset'], 
+                                    'type_match_mask_offset': prompt_data['type_match_mask_offset'], 
+                                    'arg_match_mask_offset': prompt_data['arg_match_mask_offset'], 
+                                    'trigger_offsets': prompt_data['trigger_offsets'], 
+                                    'e1_id': event_1['start'], # event1
+                                    'e1_trigger': event_1['trigger'], 
+                                    'e1_subtype': event_1['subtype'] if event_1['subtype'] in EVENT_SUBTYPES else 'normal', 
+                                    'e1_subtype_id': subtype2id.get(event_1['subtype'], 0), # 0 - 'other'
+                                    'e1s_offset': prompt_data['e1s_offset'], 
+                                    'e1e_offset': prompt_data['e1e_offset'], 
+                                    'e1_type_mask_offset': prompt_data['e1_type_mask_offset'], 
+                                    'e2_id': event_2['start'], # event2
+                                    'e2_trigger': event_2['trigger'], 
+                                    'e2_subtype': event_2['subtype'] if event_2['subtype'] in EVENT_SUBTYPES else 'normal', 
+                                    'e2_subtype_id': subtype2id.get(event_2['subtype'], 0), # 0 - 'other'
+                                    'e2s_offset': prompt_data['e2s_offset'], 
+                                    'e2e_offset': prompt_data['e2e_offset'], 
+                                    'e2_type_mask_offset': prompt_data['e2_type_mask_offset'], 
+                                    'label': 0
+                                })
         return Data
     
     def __len__(self):
@@ -674,15 +789,16 @@ if __name__ == '__main__':
     train_small_data = KBPCorefTiny(
         '../../data/train_filtered.json', 
         '../../data/train_filtered_with_cos.json', 
-        '../../data/KnowledgeExtraction/simi_files/simi_chatgpt_train_related_info_0.75.json', 
-        neg_top_k=3, prompt_type=args.prompt_type, select_arg_strategy=args.select_arg_strategy, 
-        model_type=args.model_type, tokenizer=tokenizer, max_length=args.max_seq_length
+        '../../data/KnowledgeExtraction/simi_files/simi_omni_train_related_info_0.75.json', 
+        prompt_type=args.prompt_type, select_arg_strategy=args.select_arg_strategy, 
+        model_type=args.model_type, tokenizer=tokenizer, max_length=args.max_seq_length, 
+        sample_strategy='nearmiss', neg_top_k=3
     )
     print_data_statistic('../../data/train_filtered_with_cos.json')
     print(len(train_small_data))
     labels = [train_small_data[s_idx]['label'] for s_idx in range(len(train_small_data))]
     print('Coref:', labels.count(1), 'non-Coref:', labels.count(0))
-    for i in range(5):
+    for i in range(3):
         print(train_small_data[i])
     
     verbalizer = {

@@ -269,12 +269,13 @@ if __name__ == '__main__':
                 args.train_file, 
                 args.train_file_with_cos, 
                 args.train_simi_file, 
-                neg_top_k=args.neg_top_k, 
                 prompt_type=args.prompt_type, 
                 select_arg_strategy=args.select_arg_strategy, 
                 model_type=args.model_type, 
                 tokenizer=tokenizer, 
-                max_length=args.max_seq_length
+                max_length=args.max_seq_length, 
+                sample_strategy=args.sample_strategy, 
+                neg_top_k=args.neg_top_k
             )
         labels = [train_dataset[s_idx]['label'] for s_idx in range(len(train_dataset))]
         logger.info(f"[Train] Coref: {labels.count(1)} non-Coref: {labels.count(0)}")
