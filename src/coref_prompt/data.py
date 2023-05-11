@@ -134,7 +134,7 @@ class KBPCorefTiny(Dataset):
         - data_file_with_cos: train data file with event similarities
         '''
         assert prompt_type in PROMPT_TYPE and select_arg_strategy in SELECT_ARG_STRATEGY and model_type in ['bert', 'roberta', 'longformer']
-        assert sample_strategy in ['random', 'nearmiss', 'nearneighbour']
+        assert sample_strategy in ['random', 'corefnm', 'corefenn']
         assert neg_top_k > 0
         np.random.seed(rand_seed)
         self.model_type = model_type
@@ -248,7 +248,7 @@ class KBPCorefTiny(Dataset):
                         'e2_type_mask_offset': prompt_data['e2_type_mask_offset'], 
                         'label': 0
                     })
-            elif self.sample_strategy == 'nearmiss':
+            elif self.sample_strategy == 'corefnm':
                 for line in tqdm(f_cos.readlines()):
                     sample = json.loads(line.strip())
                     clusters = sample['clusters']
@@ -294,7 +294,7 @@ class KBPCorefTiny(Dataset):
                                     'e2_type_mask_offset': prompt_data['e2_type_mask_offset'], 
                                     'label': 0
                                 })
-            elif self.sample_strategy == 'nearneighbour':
+            elif self.sample_strategy == 'corefenn':
                 for line in tqdm(f_cos.readlines()):
                     sample = json.loads(line.strip())
                     clusters = sample['clusters']
@@ -345,6 +345,8 @@ class KBPCorefTiny(Dataset):
                                     'e2_type_mask_offset': prompt_data['e2_type_mask_offset'], 
                                     'label': 0
                                 })
+            else:
+                raise ValueError(f'Unknown sampling type: {prompt_type}')
         return Data
     
     def __len__(self):
@@ -792,7 +794,7 @@ if __name__ == '__main__':
         '../../data/KnowledgeExtraction/simi_files/simi_omni_train_related_info_0.75.json', 
         prompt_type=args.prompt_type, select_arg_strategy=args.select_arg_strategy, 
         model_type=args.model_type, tokenizer=tokenizer, max_length=args.max_seq_length, 
-        sample_strategy='nearmiss', neg_top_k=3
+        sample_strategy='corefnm', neg_top_k=3
     )
     print_data_statistic('../../data/train_filtered_with_cos.json')
     print(len(train_small_data))
