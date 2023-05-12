@@ -14,6 +14,7 @@ from src.coref_prompt.arg import parse_args
 from src.coref_prompt.data import KBPCoref, KBPCorefTiny, get_dataLoader
 from src.coref_prompt.data import get_pred_related_info
 from src.coref_prompt.modeling import BertForMixPrompt, RobertaForMixPrompt, LongformerForMixPrompt
+from src.coref_prompt.modeling import BertForSimpMixPrompt, RobertaForSimpMixPrompt, LongformerForSimpMixPrompt
 from src.coref_prompt.prompt import EVENT_SUBTYPES, id2subtype
 from src.coref_prompt.prompt import create_prompt, create_verbalizer, get_special_tokens
 
@@ -23,9 +24,14 @@ logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s - %(message)s
 logger = logging.getLogger("Model")
 
 MIX_PROMPT_MODELS = {
-    'bert': BertForMixPrompt,
+    'bert': BertForMixPrompt, 
     'roberta': RobertaForMixPrompt, 
     'longformer': LongformerForMixPrompt
+}
+SIMP_MIX_PROMPT_MODELS = {
+    'bert': BertForSimpMixPrompt, 
+    'roberta': RobertaForSimpMixPrompt, 
+    'longformer': LongformerForSimpMixPrompt
 }
 
 def to_device(args, batch_data):
@@ -181,6 +187,8 @@ def predict(
         encoding.char_to_token(prompt_data['e2e_offset'])
     )
     e1_type_mask_idx, e2_type_mask_idx = (
+        -1, -1
+     ) if prompt_type == 'ma_remove-anchor' else (
         encoding.char_to_token(prompt_data['e1_type_mask_offset']), 
         encoding.char_to_token(prompt_data['e2_type_mask_offset'])
     )
@@ -197,6 +205,14 @@ def predict(
         return_tensors="pt"
     )
     inputs = {
+        'batch_inputs': inputs, 
+        'batch_mask_idx': [mask_idx], 
+        'batch_type_match_mask_idx': [type_match_mask_idx], 
+        'batch_arg_match_mask_idx': [arg_match_mask_idx], 
+        'batch_event_idx': [event_idx], 
+        'label_word_id': [verbalizer['non-coref']['id'], verbalizer['coref']['id']], 
+        'match_label_word_id': [verbalizer['match']['id'], verbalizer['mismatch']['id']], 
+    } if prompt_type == 'ma_remove-anchor' else {
         'batch_inputs': inputs, 
         'batch_mask_idx': [mask_idx], 
         'batch_type_match_mask_idx': [type_match_mask_idx], 
@@ -235,17 +251,27 @@ if __name__ == '__main__':
     logger.info(f'loading pretrained model and tokenizer of {args.model_type} ...')
     config = AutoConfig.from_pretrained(args.model_checkpoint, cache_dir=args.cache_dir)
     tokenizer = AutoTokenizer.from_pretrained(args.model_checkpoint, max_length=args.max_seq_length, cache_dir=args.cache_dir)
-    model = MIX_PROMPT_MODELS[args.model_type].from_pretrained(
-        args.model_checkpoint,
-        config=config, 
-        args=args, 
-        cache_dir=args.cache_dir
-    ).to(args.device)
+    if args.prompt_type == 'ma_remove-anchor': 
+        model = SIMP_MIX_PROMPT_MODELS[args.model_type].from_pretrained(
+            args.model_checkpoint,
+            config=config, 
+            args=args, 
+            cache_dir=args.cache_dir
+        ).to(args.device)
+    else: 
+        model = MIX_PROMPT_MODELS[args.model_type].from_pretrained(
+            args.model_checkpoint,
+            config=config, 
+            args=args, 
+            cache_dir=args.cache_dir
+        ).to(args.device)
     base_sp_tokens = get_special_tokens(args.model_type, 'base')
     connect_tokens = get_special_tokens(args.model_type, 'connect')
     match_tokens = get_special_tokens(args.model_type, 'match')
     event_subtype_tokens = get_special_tokens(args.model_type, 'event_subtype')
     sp_tokens = (
+        base_sp_tokens + match_tokens 
+        if args.prompt_type == 'ma_remove-anchor' else 
         base_sp_tokens + connect_tokens + match_tokens + event_subtype_tokens 
         if 'c' in args.prompt_type else 
         base_sp_tokens + match_tokens + event_subtype_tokens
@@ -282,7 +308,7 @@ if __name__ == '__main__':
                 new_embedding = model.longformer.embeddings.word_embeddings.weight[norefer_tokenized_ids].mean(axis=0)
                 model.longformer.embeddings.word_embeddings.weight[norefer_idx, :] = new_embedding.clone().detach().requires_grad_(True)
     logger.info(f"initialize embeddings for {verbalizer['match']['token']} and {verbalizer['mismatch']['token']}...")
-    subtype_sp_token_num = len(EVENT_SUBTYPES) + 1
+    subtype_sp_token_num = 0 if args.prompt_type == 'ma_remove-anchor' else len(EVENT_SUBTYPES) + 1
     match_idx, mismatch_idx = -(subtype_sp_token_num+2), -(subtype_sp_token_num+1)
     with torch.no_grad():
         match_tokenized = tokenizer.tokenize(verbalizer['match']['description'])
@@ -304,26 +330,27 @@ if __name__ == '__main__':
             model.longformer.embeddings.word_embeddings.weight[match_idx, :] = new_embedding.clone().detach().requires_grad_(True)
             new_embedding = model.longformer.embeddings.word_embeddings.weight[mismatch_tokenized_ids].mean(axis=0)
             model.longformer.embeddings.word_embeddings.weight[mismatch_idx, :] = new_embedding.clone().detach().requires_grad_(True)
-    logger.info(f"initialize embeddings for event subtype special tokens...")
-    subtype_descriptions = [
-        verbalizer[id2subtype[s_id]]['description'] for s_id in range(len(EVENT_SUBTYPES) + 1)
-    ]
-    with torch.no_grad():
-        for i, description in enumerate(reversed(subtype_descriptions), start=1):
-            tokenized = tokenizer.tokenize(description)
-            tokenized_ids = tokenizer.convert_tokens_to_ids(tokenized)
-            if args.model_type == 'bert':
-                new_embedding = model.bert.embeddings.word_embeddings.weight[tokenized_ids].mean(axis=0)
-                model.bert.embeddings.word_embeddings.weight[-i, :] = new_embedding.clone().detach().requires_grad_(True)
-            elif args.model_type == 'roberta':
-                new_embedding = model.roberta.embeddings.word_embeddings.weight[tokenized_ids].mean(axis=0)
-                model.roberta.embeddings.word_embeddings.weight[-i, :] = new_embedding.clone().detach().requires_grad_(True)
-            else: # longformer
-                new_embedding = model.longformer.embeddings.word_embeddings.weight[tokenized_ids].mean(axis=0)
-                model.longformer.embeddings.word_embeddings.weight[-i, :] = new_embedding.clone().detach().requires_grad_(True)
+    if args.prompt_type != 'ma_remove-anchor': 
+        logger.info(f"initialize embeddings for event subtype special tokens...")
+        subtype_descriptions = [
+            verbalizer[id2subtype[s_id]]['description'] for s_id in range(len(EVENT_SUBTYPES) + 1)
+        ]
+        with torch.no_grad():
+            for i, description in enumerate(reversed(subtype_descriptions), start=1):
+                tokenized = tokenizer.tokenize(description)
+                tokenized_ids = tokenizer.convert_tokens_to_ids(tokenized)
+                if args.model_type == 'bert':
+                    new_embedding = model.bert.embeddings.word_embeddings.weight[tokenized_ids].mean(axis=0)
+                    model.bert.embeddings.word_embeddings.weight[-i, :] = new_embedding.clone().detach().requires_grad_(True)
+                elif args.model_type == 'roberta':
+                    new_embedding = model.roberta.embeddings.word_embeddings.weight[tokenized_ids].mean(axis=0)
+                    model.roberta.embeddings.word_embeddings.weight[-i, :] = new_embedding.clone().detach().requires_grad_(True)
+                else: # longformer
+                    new_embedding = model.longformer.embeddings.word_embeddings.weight[tokenized_ids].mean(axis=0)
+                    model.longformer.embeddings.word_embeddings.weight[-i, :] = new_embedding.clone().detach().requires_grad_(True)
     # Training
     if args.do_train:
-        if args.train_data_type == 'normal':
+        if args.sample_strategy == 'no':
             train_dataset = KBPCoref(
                 args.train_file, 
                 args.train_simi_file, 

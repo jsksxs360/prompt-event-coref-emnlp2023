@@ -15,9 +15,8 @@ def parse_args():
     parser.add_argument("--dev_simi_file", default=None, type=str, required=True, help="The input related info file.")
     parser.add_argument("--test_simi_file", default=None, type=str, required=True, help="The input related info file.")
     parser.add_argument("--pred_test_simi_file", default=None, type=str, required=True, help="The input related info file.")
-    # using normal/tiny dataset
-    parser.add_argument("--train_data_type", default="tiny", type=str, required=True, choices=['normal', 'tiny'])
-    parser.add_argument("--sample_strategy", default="nearmiss", type=str, required=True, choices=['random', 'corefnm', 'corefenn'])
+    # whether use tiny dataset
+    parser.add_argument("--sample_strategy", default="corefnm", type=str, required=True, choices=['no', 'random', 'corefnm', 'corefenn'])
     parser.add_argument("--neg_top_k", default="1", type=int)
     
     parser.add_argument("--model_type", default="bert", type=str, required=True, choices=['bert', 'roberta', 'longformer'])

@@ -18,8 +18,7 @@ python3 run_base_prompt.py \
     --dev_simi_file=../../data/KnowledgeExtraction/simi_files/simi_omni_dev_related_info_0.75.json \
     --test_simi_file=../../data/KnowledgeExtraction/simi_files/simi_omni_gold_test_related_info_0.75.json \
     --pred_test_simi_file=../../data/KnowledgeExtraction/simi_files/simi_omni_epoch_3_test_related_info_0.75.json \
-    --train_data_type=tiny \
-    --sample_strategy=nearmiss \
+    --sample_strategy=corefnm \
     --neg_top_k=3 \
     --max_seq_length=512 \
     --learning_rate=1e-5 \

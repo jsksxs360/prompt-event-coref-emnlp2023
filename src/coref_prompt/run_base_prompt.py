@@ -254,7 +254,7 @@ if __name__ == '__main__':
                 model.longformer.embeddings.word_embeddings.weight[norefer_idx, :] = new_embedding.clone().detach().requires_grad_(True)
     # Training
     if args.do_train:
-        if args.train_data_type == 'normal':
+        if args.sample_strategy == 'no':
             train_dataset = KBPCoref(
                 args.train_file, 
                 args.train_simi_file, 
