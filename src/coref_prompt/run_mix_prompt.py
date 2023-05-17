@@ -13,8 +13,8 @@ from src.tools import seed_everything, NpEncoder
 from src.coref_prompt.arg import parse_args
 from src.coref_prompt.data import KBPCoref, KBPCorefTiny, get_dataLoader
 from src.coref_prompt.data import get_pred_related_info
-from src.coref_prompt.modeling import BertForMixPrompt, RobertaForMixPrompt, LongformerForMixPrompt
-from src.coref_prompt.modeling import BertForSimpMixPrompt, RobertaForSimpMixPrompt, LongformerForSimpMixPrompt
+from src.coref_prompt.modeling import BertForMixPrompt, RobertaForMixPrompt, DebertaForMixPrompt, LongformerForMixPrompt
+from src.coref_prompt.modeling import BertForSimpMixPrompt, RobertaForSimpMixPrompt, DebertaForSimpMixPrompt, LongformerForSimpMixPrompt
 from src.coref_prompt.prompt import EVENT_SUBTYPES, id2subtype
 from src.coref_prompt.prompt import create_prompt, create_verbalizer, get_special_tokens
 
@@ -26,11 +26,13 @@ logger = logging.getLogger("Model")
 MIX_PROMPT_MODELS = {
     'bert': BertForMixPrompt, 
     'roberta': RobertaForMixPrompt, 
+    'deberta': DebertaForMixPrompt, 
     'longformer': LongformerForMixPrompt
 }
 SIMP_MIX_PROMPT_MODELS = {
     'bert': BertForSimpMixPrompt, 
     'roberta': RobertaForSimpMixPrompt, 
+    'deberta': DebertaForSimpMixPrompt, 
     'longformer': LongformerForSimpMixPrompt
 }
 
@@ -302,6 +304,11 @@ if __name__ == '__main__':
                 model.roberta.embeddings.word_embeddings.weight[refer_idx, :] = new_embedding.clone().detach().requires_grad_(True)
                 new_embedding = model.roberta.embeddings.word_embeddings.weight[norefer_tokenized_ids].mean(axis=0)
                 model.roberta.embeddings.word_embeddings.weight[norefer_idx, :] = new_embedding.clone().detach().requires_grad_(True)
+            elif args.model_type == 'deberta':
+                new_embedding = model.deberta.embeddings.word_embeddings.weight[refer_tokenized_ids].mean(axis=0)
+                model.deberta.embeddings.word_embeddings.weight[refer_idx, :] = new_embedding.clone().detach().requires_grad_(True)
+                new_embedding = model.deberta.embeddings.word_embeddings.weight[norefer_tokenized_ids].mean(axis=0)
+                model.deberta.embeddings.word_embeddings.weight[norefer_idx, :] = new_embedding.clone().detach().requires_grad_(True)
             else: # longformer
                 new_embedding = model.longformer.embeddings.word_embeddings.weight[refer_tokenized_ids].mean(axis=0)
                 model.longformer.embeddings.word_embeddings.weight[refer_idx, :] = new_embedding.clone().detach().requires_grad_(True)
@@ -325,6 +332,11 @@ if __name__ == '__main__':
             model.roberta.embeddings.word_embeddings.weight[match_idx, :] = new_embedding.clone().detach().requires_grad_(True)
             new_embedding = model.roberta.embeddings.word_embeddings.weight[mismatch_tokenized_ids].mean(axis=0)
             model.roberta.embeddings.word_embeddings.weight[mismatch_idx, :] = new_embedding.clone().detach().requires_grad_(True)
+        elif args.model_type == 'deberta':
+            new_embedding = model.deberta.embeddings.word_embeddings.weight[match_tokenized_ids].mean(axis=0)
+            model.deberta.embeddings.word_embeddings.weight[match_idx, :] = new_embedding.clone().detach().requires_grad_(True)
+            new_embedding = model.deberta.embeddings.word_embeddings.weight[mismatch_tokenized_ids].mean(axis=0)
+            model.deberta.embeddings.word_embeddings.weight[mismatch_idx, :] = new_embedding.clone().detach().requires_grad_(True)
         else: # longformer
             new_embedding = model.longformer.embeddings.word_embeddings.weight[match_tokenized_ids].mean(axis=0)
             model.longformer.embeddings.word_embeddings.weight[match_idx, :] = new_embedding.clone().detach().requires_grad_(True)
@@ -345,6 +357,9 @@ if __name__ == '__main__':
                 elif args.model_type == 'roberta':
                     new_embedding = model.roberta.embeddings.word_embeddings.weight[tokenized_ids].mean(axis=0)
                     model.roberta.embeddings.word_embeddings.weight[-i, :] = new_embedding.clone().detach().requires_grad_(True)
+                elif args.model_type == 'deberta':
+                    new_embedding = model.deberta.embeddings.word_embeddings.weight[tokenized_ids].mean(axis=0)
+                    model.deberta.embeddings.word_embeddings.weight[-i, :] = new_embedding.clone().detach().requires_grad_(True)
                 else: # longformer
                     new_embedding = model.longformer.embeddings.word_embeddings.weight[tokenized_ids].mean(axis=0)
                     model.longformer.embeddings.word_embeddings.weight[-i, :] = new_embedding.clone().detach().requires_grad_(True)

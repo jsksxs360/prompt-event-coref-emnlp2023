@@ -40,7 +40,7 @@ def get_event_cluster_id(event_id:str, clusters:list) -> str:
 
 class KBPCoref(Dataset):
     def __init__(self, data_file:str, simi_file:str, prompt_type:str, select_arg_strategy:str, model_type:str, tokenizer, max_length:int):
-        assert prompt_type in PROMPT_TYPE and select_arg_strategy in SELECT_ARG_STRATEGY and model_type in ['bert', 'roberta', 'longformer']
+        assert prompt_type in PROMPT_TYPE and select_arg_strategy in SELECT_ARG_STRATEGY and model_type in ['bert', 'roberta', 'deberta', 'longformer']
         self.model_type = model_type
         self.tokenizer = tokenizer
         self.max_length = max_length
@@ -133,7 +133,7 @@ class KBPCorefTiny(Dataset):
         - data_file: source train data file
         - data_file_with_cos: train data file with event similarities
         '''
-        assert prompt_type in PROMPT_TYPE and select_arg_strategy in SELECT_ARG_STRATEGY and model_type in ['bert', 'roberta', 'longformer']
+        assert prompt_type in PROMPT_TYPE and select_arg_strategy in SELECT_ARG_STRATEGY and model_type in ['bert', 'roberta', 'deberta', 'longformer']
         assert sample_strategy in ['random', 'corefnm', 'corefenn']
         assert neg_top_k > 0
         np.random.seed(rand_seed)

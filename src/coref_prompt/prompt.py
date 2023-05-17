@@ -8,8 +8,8 @@ import numpy as np
 PROMPT_TYPE = [
     'hn', 'hc', 'hq', # base prompts
     'sn', 'sc', 'sq', 
-    'm_ht_hn', 'm_ht_hc', 'm_ht_hq', 'm_hta_hn', 'm_hta_hc', 'm_hta_hq', 'm_htao_hn', 'm_htao_hc', 'm_htao_hq', # mix prompts
-    'm_st_hn', 'm_st_hc', 'm_st_hq', 'm_sta_hn', 'm_sta_hc', 'm_sta_hq', 'm_stao_hn', 'm_stao_hc', 'm_stao_hq', 
+    'm_ht_hn', 'm_ht_hc', 'm_ht_hq', 'm_hta_hn', 'm_hta_hc', 'm_hta_hq', # mix prompts
+    'm_st_hn', 'm_st_hc', 'm_st_hq', 'm_sta_hn', 'm_sta_hc', 'm_sta_hq', 
     'ma_remove-prefix', 'ma_remove-anchor' # mix prompt ablation
 ]
 WORD_FILTER = set([
@@ -320,10 +320,7 @@ def create_mix_template(
         e2_anchor_temp += f"{s_tokens['e2s']} {e2_trigger} "
         e2e_anchor_offset = len(e2_anchor_temp)
         e2_anchor_temp += f"{s_tokens['e2e']} expresses a {s_tokens['mask']} event"
-        if anchor_temp_type == 'htao': 
-            e1_anchor_temp += f"{' ' + e1_arg_str if e1_arg_str else ''}{' ' + e1_related_str if e1_related_str else ''}."
-            e2_anchor_temp += f"{' ' + e2_arg_str if e2_arg_str else ''}{' ' + e2_related_str if e2_related_str else ''}."
-        elif anchor_temp_type == 'hta': 
+        if anchor_temp_type == 'hta': 
             e1_anchor_temp += f"{' ' + e1_arg_str if e1_arg_str else ''}."
             e2_anchor_temp += f"{' ' + e2_arg_str if e2_arg_str else ''}."
         elif anchor_temp_type == 'ht': 
@@ -342,10 +339,7 @@ def create_mix_template(
         e2_anchor_temp += f"{s_tokens['e2s']} {e2_trigger} "
         e2e_anchor_offset = len(e2_anchor_temp)
         e2_anchor_temp += f"{s_tokens['e2e']}"
-        if anchor_temp_type == 'stao': 
-            e1_anchor_temp += f"{' ' + e1_arg_str if e1_arg_str else ''}{' ' + e1_related_str + ' ' if e1_related_str else ' '}{s_tokens['l2']}."
-            e2_anchor_temp += f"{' ' + e2_arg_str if e2_arg_str else ''}{' ' + e2_related_str + ' ' if e2_related_str else ' '}{s_tokens['l4']}."
-        elif anchor_temp_type == 'sta': 
+        if anchor_temp_type == 'sta': 
             e1_anchor_temp += f"{' ' + e1_arg_str + ' ' if e1_arg_str else ' '}{s_tokens['l2']}."
             e2_anchor_temp += f"{' ' + e2_arg_str + ' ' if e2_arg_str else ' '}{s_tokens['l4']}."
         elif anchor_temp_type == 'st': 

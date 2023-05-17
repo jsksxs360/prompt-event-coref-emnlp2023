@@ -13,7 +13,7 @@ from src.tools import seed_everything, NpEncoder
 from src.coref_prompt.arg import parse_args
 from src.coref_prompt.data import KBPCoref, KBPCorefTiny, get_dataLoader
 from src.coref_prompt.data import get_pred_related_info
-from src.coref_prompt.modeling import BertForBasePrompt, RobertaForBasePrompt, LongformerForBasePrompt
+from src.coref_prompt.modeling import BertForBasePrompt, RobertaForBasePrompt, DebertaForBasePrompt, LongformerForBasePrompt
 from src.coref_prompt.prompt import create_prompt, create_verbalizer, get_special_tokens
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
@@ -24,6 +24,7 @@ logger = logging.getLogger("Model")
 BASE_PROMPT_MODELS = {
     'bert': BertForBasePrompt,
     'roberta': RobertaForBasePrompt, 
+    'deberta': DebertaForBasePrompt, 
     'longformer': LongformerForBasePrompt
 }
 
@@ -247,6 +248,11 @@ if __name__ == '__main__':
                 model.roberta.embeddings.word_embeddings.weight[refer_idx, :] = new_embedding.clone().detach().requires_grad_(True)
                 new_embedding = model.roberta.embeddings.word_embeddings.weight[norefer_tokenized_ids].mean(axis=0)
                 model.roberta.embeddings.word_embeddings.weight[norefer_idx, :] = new_embedding.clone().detach().requires_grad_(True)
+            elif args.model_type == 'deberta':
+                new_embedding = model.deberta.embeddings.word_embeddings.weight[refer_tokenized_ids].mean(axis=0)
+                model.deberta.embeddings.word_embeddings.weight[refer_idx, :] = new_embedding.clone().detach().requires_grad_(True)
+                new_embedding = model.deberta.embeddings.word_embeddings.weight[norefer_tokenized_ids].mean(axis=0)
+                model.deberta.embeddings.word_embeddings.weight[norefer_idx, :] = new_embedding.clone().detach().requires_grad_(True)
             else: # longformer
                 new_embedding = model.longformer.embeddings.word_embeddings.weight[refer_tokenized_ids].mean(axis=0)
                 model.longformer.embeddings.word_embeddings.weight[refer_idx, :] = new_embedding.clone().detach().requires_grad_(True)
