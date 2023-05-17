@@ -403,12 +403,14 @@ class BertForMixPrompt(BertPreTrainedModel):
         self.hidden_size = config.hidden_size
         self.matching_style = args.matching_style
         self.use_device = args.device
+        self.remove_match = (args.prompt_type == 'ma_remove-match')
         if self.matching_style != 'none':
             self.span_extractor = SelfAttentiveSpanExtractor(input_dim=self.hidden_size)
             if self.matching_style == 'product':
                 self.coref_mapping = nn.Linear(2 * self.hidden_size, self.hidden_size)
-                self.type_match_mapping = nn.Linear(2 * self.hidden_size, self.hidden_size)
-                self.arg_match_mapping = nn.Linear(2 * self.hidden_size, self.hidden_size)
+                if not self.remove_match:
+                    self.type_match_mapping = nn.Linear(2 * self.hidden_size, self.hidden_size)
+                    self.arg_match_mapping = nn.Linear(2 * self.hidden_size, self.hidden_size)
             else:
                 self.cosine_space_dim, self.cosine_slices, self.tensor_factor = (
                     args.cosine_space_dim, args.cosine_slices, args.cosine_factor
@@ -418,12 +420,14 @@ class BertForMixPrompt(BertPreTrainedModel):
                 self.cosine_mat_q = nn.Parameter(torch.rand((self.tensor_factor, self.cosine_space_dim), requires_grad=True))
                 if self.matching_style == 'cosine':
                     self.coref_mapping = nn.Linear(self.hidden_size + self.cosine_slices, self.hidden_size)
-                    self.type_match_mapping = nn.Linear(self.hidden_size + self.cosine_slices, self.hidden_size)
-                    self.arg_match_mapping = nn.Linear(self.hidden_size + self.cosine_slices, self.hidden_size)
+                    if not self.remove_match:
+                        self.type_match_mapping = nn.Linear(self.hidden_size + self.cosine_slices, self.hidden_size)
+                        self.arg_match_mapping = nn.Linear(self.hidden_size + self.cosine_slices, self.hidden_size)
                 elif self.matching_style == 'product_cosine':
                     self.coref_mapping = nn.Linear(2 * self.hidden_size + self.cosine_slices, self.hidden_size)
-                    self.type_match_mapping = nn.Linear(2 * self.hidden_size + self.cosine_slices, self.hidden_size)
-                    self.arg_match_mapping = nn.Linear(2 * self.hidden_size + self.cosine_slices, self.hidden_size)
+                    if not self.remove_match:
+                        self.type_match_mapping = nn.Linear(2 * self.hidden_size + self.cosine_slices, self.hidden_size)
+                        self.arg_match_mapping = nn.Linear(2 * self.hidden_size + self.cosine_slices, self.hidden_size)
         self.post_init()
     
     def get_output_embeddings(self):
@@ -450,24 +454,27 @@ class BertForMixPrompt(BertPreTrainedModel):
         return batch_e1_e2_match
     
     def forward(self, 
-        batch_inputs, batch_mask_idx, batch_type_match_mask_idx, batch_arg_match_mask_idx, 
+        batch_inputs, batch_mask_idx, 
         batch_event_idx, batch_t1_mask_idx, batch_t2_mask_idx, 
-        label_word_id, match_label_word_id, subtype_label_word_id, 
-        batch_mask_inputs=None, labels=None, subtype_match_labels=None, arg_match_labels=None, e1_subtype_labels=None, e2_subtype_labels=None
+        label_word_id, subtype_label_word_id, match_label_word_id=None, 
+        batch_mask_inputs=None, batch_type_match_mask_idx=None, batch_arg_match_mask_idx=None, 
+        labels=None, subtype_match_labels=None, arg_match_labels=None, e1_subtype_labels=None, e2_subtype_labels=None
         ):
         outputs = self.bert(**batch_inputs)
         sequence_output = outputs.last_hidden_state
         batch_mask_reps = batched_index_select(sequence_output, 1, batch_mask_idx.unsqueeze(-1)).squeeze(1)
-        batch_type_match_mask_reps = batched_index_select(sequence_output, 1, batch_type_match_mask_idx.unsqueeze(-1)).squeeze(1)
-        batch_arg_match_mask_reps = batched_index_select(sequence_output, 1, batch_arg_match_mask_idx.unsqueeze(-1)).squeeze(1)
+        if not self.remove_match:
+            batch_type_match_mask_reps = batched_index_select(sequence_output, 1, batch_type_match_mask_idx.unsqueeze(-1)).squeeze(1)
+            batch_arg_match_mask_reps = batched_index_select(sequence_output, 1, batch_arg_match_mask_idx.unsqueeze(-1)).squeeze(1)
         batch_t1_mask_reps = batched_index_select(sequence_output, 1, batch_t1_mask_idx.unsqueeze(-1)).squeeze(1)
         batch_t2_mask_reps = batched_index_select(sequence_output, 1, batch_t2_mask_idx.unsqueeze(-1)).squeeze(1)
         if batch_mask_inputs is not None:
             mask_outputs = self.bert(**batch_mask_inputs)
             mask_sequence_output = mask_outputs.last_hidden_state
             batch_mask_mask_reps = batched_index_select(mask_sequence_output, 1, batch_mask_idx.unsqueeze(-1)).squeeze(1)
-            batch_mask_type_match_mask_reps = batched_index_select(mask_sequence_output, 1, batch_type_match_mask_idx.unsqueeze(-1)).squeeze(1)
-            batch_mask_arg_match_mask_reps = batched_index_select(mask_sequence_output, 1, batch_arg_match_mask_idx.unsqueeze(-1)).squeeze(1)
+            if not self.remove_match:
+                batch_mask_type_match_mask_reps = batched_index_select(mask_sequence_output, 1, batch_type_match_mask_idx.unsqueeze(-1)).squeeze(1)
+                batch_mask_arg_match_mask_reps = batched_index_select(mask_sequence_output, 1, batch_arg_match_mask_idx.unsqueeze(-1)).squeeze(1)
             batch_mask_t1_mask_reps = batched_index_select(mask_sequence_output, 1, batch_t1_mask_idx.unsqueeze(-1)).squeeze(1)
             batch_mask_t2_mask_reps = batched_index_select(mask_sequence_output, 1, batch_t2_mask_idx.unsqueeze(-1)).squeeze(1)
         if self.matching_style != 'none':
@@ -484,26 +491,30 @@ class BertForMixPrompt(BertPreTrainedModel):
             batch_event_2_reps = self.span_extractor(sequence_output, batch_e2_idx).squeeze(dim=1)
             batch_match_reps = self._matching_func(batch_event_1_reps, batch_event_2_reps)
             batch_mask_reps = self.coref_mapping(torch.cat([batch_mask_reps, batch_match_reps], dim=-1))
-            batch_arg_match_mask_reps = self.arg_match_mapping(torch.cat([batch_arg_match_mask_reps, batch_match_reps], dim=-1))
-            batch_subtype_match_reps = self._matching_func(batch_t1_mask_reps, batch_t2_mask_reps)
-            batch_type_match_mask_reps = self.type_match_mapping(torch.cat([batch_type_match_mask_reps, batch_subtype_match_reps], dim=-1))
+            if not self.remove_match:
+                batch_arg_match_mask_reps = self.arg_match_mapping(torch.cat([batch_arg_match_mask_reps, batch_match_reps], dim=-1))
+                batch_subtype_match_reps = self._matching_func(batch_t1_mask_reps, batch_t2_mask_reps)
+                batch_type_match_mask_reps = self.type_match_mapping(torch.cat([batch_type_match_mask_reps, batch_subtype_match_reps], dim=-1))
             if batch_mask_inputs is not None:
                 batch_mask_event_1_reps = self.span_extractor(mask_sequence_output, batch_e1_idx).squeeze(dim=1)
                 batch_mask_event_2_reps = self.span_extractor(mask_sequence_output, batch_e2_idx).squeeze(dim=1)
                 batch_mask_match_reps = self._matching_func(batch_mask_event_1_reps, batch_mask_event_2_reps)
                 batch_mask_mask_reps = self.coref_mapping(torch.cat([batch_mask_mask_reps, batch_mask_match_reps], dim=-1))
-                batch_mask_arg_match_mask_reps = self.arg_match_mapping(torch.cat([batch_mask_arg_match_mask_reps, batch_mask_match_reps], dim=-1))
-                batch_mask_subtype_match_reps = self._matching_func(batch_mask_t1_mask_reps, batch_mask_t2_mask_reps)
-                batch_mask_type_match_mask_reps = self.type_match_mapping(torch.cat([batch_mask_type_match_mask_reps, batch_mask_subtype_match_reps], dim=-1))
+                if not self.remove_match:
+                    batch_mask_arg_match_mask_reps = self.arg_match_mapping(torch.cat([batch_mask_arg_match_mask_reps, batch_mask_match_reps], dim=-1))
+                    batch_mask_subtype_match_reps = self._matching_func(batch_mask_t1_mask_reps, batch_mask_t2_mask_reps)
+                    batch_mask_type_match_mask_reps = self.type_match_mapping(torch.cat([batch_mask_type_match_mask_reps, batch_mask_subtype_match_reps], dim=-1))
         coref_logits = self.cls(batch_mask_reps)[:, label_word_id]
-        type_match_logits = self.cls(batch_type_match_mask_reps)[:, match_label_word_id]
-        arg_match_logits = self.cls(batch_arg_match_mask_reps)[:, match_label_word_id]
+        if not self.remove_match:
+            type_match_logits = self.cls(batch_type_match_mask_reps)[:, match_label_word_id]
+            arg_match_logits = self.cls(batch_arg_match_mask_reps)[:, match_label_word_id]
         e1_type_logits = self.cls(batch_t1_mask_reps)[:, subtype_label_word_id]
         e2_type_logits = self.cls(batch_t2_mask_reps)[:, subtype_label_word_id]
         if batch_mask_inputs is not None:
             mask_coref_logits = self.cls(batch_mask_mask_reps)[:, label_word_id]
-            mask_type_match_logits = self.cls(batch_mask_type_match_mask_reps)[:, match_label_word_id]
-            mask_arg_match_logits = self.cls(batch_mask_arg_match_mask_reps)[:, match_label_word_id]
+            if not self.remove_match:
+                mask_type_match_logits = self.cls(batch_mask_type_match_mask_reps)[:, match_label_word_id]
+                mask_arg_match_logits = self.cls(batch_mask_arg_match_mask_reps)[:, match_label_word_id]
             mask_e1_type_logits = self.cls(batch_mask_t1_mask_reps)[:, subtype_label_word_id]
             mask_e2_type_logits = self.cls(batch_mask_t2_mask_reps)[:, subtype_label_word_id]
 
@@ -511,14 +522,20 @@ class BertForMixPrompt(BertPreTrainedModel):
         if labels is not None:
             loss_fct = CrossEntropyLoss()
             coref_loss = loss_fct(coref_logits, labels)
-            match_loss = 0.5 * loss_fct(type_match_logits, subtype_match_labels) + 0.5 * loss_fct(arg_match_logits, arg_match_labels)
             subtype_loss = 0.5 * loss_fct(e1_type_logits, e1_subtype_labels) + 0.5 * loss_fct(e2_type_logits, e2_subtype_labels)
-            loss = torch.log(1 + coref_loss) + torch.log(1 + match_loss) + torch.log(1 + subtype_loss)
+            if not self.remove_match:
+                match_loss = 0.5 * loss_fct(type_match_logits, subtype_match_labels) + 0.5 * loss_fct(arg_match_logits, arg_match_labels)
+                loss = torch.log(1 + coref_loss) + torch.log(1 + match_loss) + torch.log(1 + subtype_loss)
+            else:
+                loss = torch.log(1 + coref_loss) + torch.log(1 + subtype_loss)
             if batch_mask_inputs is not None:
                 mask_coref_loss = loss_fct(mask_coref_logits, labels)
-                mask_match_loss = 0.5 * loss_fct(mask_type_match_logits, subtype_match_labels) + 0.5 * loss_fct(mask_arg_match_logits, arg_match_labels)
                 mask_subtype_loss = 0.5 * loss_fct(mask_e1_type_logits, e1_subtype_labels) + 0.5 * loss_fct(mask_e2_type_logits, e2_subtype_labels)
-                mask_loss = torch.log(1 + mask_coref_loss) + torch.log(1 + mask_match_loss) + torch.log(1 + mask_subtype_loss)
+                if not self.remove_match:
+                    mask_match_loss = 0.5 * loss_fct(mask_type_match_logits, subtype_match_labels) + 0.5 * loss_fct(mask_arg_match_logits, arg_match_labels)
+                    mask_loss = torch.log(1 + mask_coref_loss) + torch.log(1 + mask_match_loss) + torch.log(1 + mask_subtype_loss)
+                else:
+                    mask_loss = torch.log(1 + mask_coref_loss) + torch.log(1 + mask_subtype_loss)
                 loss = 0.5 * loss + 0.5 * mask_loss
         return loss, coref_logits
 
@@ -530,12 +547,14 @@ class RobertaForMixPrompt(RobertaPreTrainedModel):
         self.hidden_size = config.hidden_size
         self.matching_style = args.matching_style
         self.use_device = args.device
+        self.remove_match = (args.prompt_type == 'ma_remove-match')
         if self.matching_style != 'none':
             self.span_extractor = SelfAttentiveSpanExtractor(input_dim=self.hidden_size)
             if self.matching_style == 'product':
                 self.coref_mapping = nn.Linear(2 * self.hidden_size, self.hidden_size)
-                self.type_match_mapping = nn.Linear(2 * self.hidden_size, self.hidden_size)
-                self.arg_match_mapping = nn.Linear(2 * self.hidden_size, self.hidden_size)
+                if not self.remove_match:
+                    self.type_match_mapping = nn.Linear(2 * self.hidden_size, self.hidden_size)
+                    self.arg_match_mapping = nn.Linear(2 * self.hidden_size, self.hidden_size)
             else:
                 self.cosine_space_dim, self.cosine_slices, self.tensor_factor = (
                     args.cosine_space_dim, args.cosine_slices, args.cosine_factor
@@ -545,12 +564,14 @@ class RobertaForMixPrompt(RobertaPreTrainedModel):
                 self.cosine_mat_q = nn.Parameter(torch.rand((self.tensor_factor, self.cosine_space_dim), requires_grad=True))
                 if self.matching_style == 'cosine':
                     self.coref_mapping = nn.Linear(self.hidden_size + self.cosine_slices, self.hidden_size)
-                    self.type_match_mapping = nn.Linear(self.hidden_size + self.cosine_slices, self.hidden_size)
-                    self.arg_match_mapping = nn.Linear(self.hidden_size + self.cosine_slices, self.hidden_size)
+                    if not self.remove_match:
+                        self.type_match_mapping = nn.Linear(self.hidden_size + self.cosine_slices, self.hidden_size)
+                        self.arg_match_mapping = nn.Linear(self.hidden_size + self.cosine_slices, self.hidden_size)
                 elif self.matching_style == 'product_cosine':
                     self.coref_mapping = nn.Linear(2 * self.hidden_size + self.cosine_slices, self.hidden_size)
-                    self.type_match_mapping = nn.Linear(2 * self.hidden_size + self.cosine_slices, self.hidden_size)
-                    self.arg_match_mapping = nn.Linear(2 * self.hidden_size + self.cosine_slices, self.hidden_size)
+                    if not self.remove_match:
+                        self.type_match_mapping = nn.Linear(2 * self.hidden_size + self.cosine_slices, self.hidden_size)
+                        self.arg_match_mapping = nn.Linear(2 * self.hidden_size + self.cosine_slices, self.hidden_size)
         self.update_keys_to_ignore(config, ["lm_head.decoder.weight"])
         self.post_init()
     
@@ -578,24 +599,27 @@ class RobertaForMixPrompt(RobertaPreTrainedModel):
         return batch_e1_e2_match
 
     def forward(self, 
-        batch_inputs, batch_mask_idx, batch_type_match_mask_idx, batch_arg_match_mask_idx, 
+        batch_inputs, batch_mask_idx, 
         batch_event_idx, batch_t1_mask_idx, batch_t2_mask_idx, 
-        label_word_id, match_label_word_id, subtype_label_word_id, 
-        batch_mask_inputs=None, labels=None, subtype_match_labels=None, arg_match_labels=None, e1_subtype_labels=None, e2_subtype_labels=None
+        label_word_id, subtype_label_word_id, match_label_word_id=None, 
+        batch_mask_inputs=None, batch_type_match_mask_idx=None, batch_arg_match_mask_idx=None, 
+        labels=None, subtype_match_labels=None, arg_match_labels=None, e1_subtype_labels=None, e2_subtype_labels=None
         ):
         outputs = self.roberta(**batch_inputs)
         sequence_output = outputs.last_hidden_state
         batch_mask_reps = batched_index_select(sequence_output, 1, batch_mask_idx.unsqueeze(-1)).squeeze(1)
-        batch_type_match_mask_reps = batched_index_select(sequence_output, 1, batch_type_match_mask_idx.unsqueeze(-1)).squeeze(1)
-        batch_arg_match_mask_reps = batched_index_select(sequence_output, 1, batch_arg_match_mask_idx.unsqueeze(-1)).squeeze(1)
+        if not self.remove_match:
+            batch_type_match_mask_reps = batched_index_select(sequence_output, 1, batch_type_match_mask_idx.unsqueeze(-1)).squeeze(1)
+            batch_arg_match_mask_reps = batched_index_select(sequence_output, 1, batch_arg_match_mask_idx.unsqueeze(-1)).squeeze(1)
         batch_t1_mask_reps = batched_index_select(sequence_output, 1, batch_t1_mask_idx.unsqueeze(-1)).squeeze(1)
         batch_t2_mask_reps = batched_index_select(sequence_output, 1, batch_t2_mask_idx.unsqueeze(-1)).squeeze(1)
         if batch_mask_inputs is not None:
             mask_outputs = self.roberta(**batch_mask_inputs)
             mask_sequence_output = mask_outputs.last_hidden_state
             batch_mask_mask_reps = batched_index_select(mask_sequence_output, 1, batch_mask_idx.unsqueeze(-1)).squeeze(1)
-            batch_mask_type_match_mask_reps = batched_index_select(mask_sequence_output, 1, batch_type_match_mask_idx.unsqueeze(-1)).squeeze(1)
-            batch_mask_arg_match_mask_reps = batched_index_select(mask_sequence_output, 1, batch_arg_match_mask_idx.unsqueeze(-1)).squeeze(1)
+            if not self.remove_match:
+                batch_mask_type_match_mask_reps = batched_index_select(mask_sequence_output, 1, batch_type_match_mask_idx.unsqueeze(-1)).squeeze(1)
+                batch_mask_arg_match_mask_reps = batched_index_select(mask_sequence_output, 1, batch_arg_match_mask_idx.unsqueeze(-1)).squeeze(1)
             batch_mask_t1_mask_reps = batched_index_select(mask_sequence_output, 1, batch_t1_mask_idx.unsqueeze(-1)).squeeze(1)
             batch_mask_t2_mask_reps = batched_index_select(mask_sequence_output, 1, batch_t2_mask_idx.unsqueeze(-1)).squeeze(1)
         if self.matching_style != 'none':
@@ -612,26 +636,30 @@ class RobertaForMixPrompt(RobertaPreTrainedModel):
             batch_event_2_reps = self.span_extractor(sequence_output, batch_e2_idx).squeeze(dim=1)
             batch_match_reps = self._matching_func(batch_event_1_reps, batch_event_2_reps)
             batch_mask_reps = self.coref_mapping(torch.cat([batch_mask_reps, batch_match_reps], dim=-1))
-            batch_arg_match_mask_reps = self.arg_match_mapping(torch.cat([batch_arg_match_mask_reps, batch_match_reps], dim=-1))
-            batch_subtype_match_reps = self._matching_func(batch_t1_mask_reps, batch_t2_mask_reps)
-            batch_type_match_mask_reps = self.type_match_mapping(torch.cat([batch_type_match_mask_reps, batch_subtype_match_reps], dim=-1))
+            if not self.remove_match:
+                batch_arg_match_mask_reps = self.arg_match_mapping(torch.cat([batch_arg_match_mask_reps, batch_match_reps], dim=-1))
+                batch_subtype_match_reps = self._matching_func(batch_t1_mask_reps, batch_t2_mask_reps)
+                batch_type_match_mask_reps = self.type_match_mapping(torch.cat([batch_type_match_mask_reps, batch_subtype_match_reps], dim=-1))
             if batch_mask_inputs is not None:
                 batch_mask_event_1_reps = self.span_extractor(mask_sequence_output, batch_e1_idx).squeeze(dim=1)
                 batch_mask_event_2_reps = self.span_extractor(mask_sequence_output, batch_e2_idx).squeeze(dim=1)
                 batch_mask_match_reps = self._matching_func(batch_mask_event_1_reps, batch_mask_event_2_reps)
                 batch_mask_mask_reps = self.coref_mapping(torch.cat([batch_mask_mask_reps, batch_mask_match_reps], dim=-1))
-                batch_mask_arg_match_mask_reps = self.arg_match_mapping(torch.cat([batch_mask_arg_match_mask_reps, batch_mask_match_reps], dim=-1))
-                batch_mask_subtype_match_reps = self._matching_func(batch_mask_t1_mask_reps, batch_mask_t2_mask_reps)
-                batch_mask_type_match_mask_reps = self.type_match_mapping(torch.cat([batch_mask_type_match_mask_reps, batch_mask_subtype_match_reps], dim=-1))
+                if not self.remove_match:
+                    batch_mask_arg_match_mask_reps = self.arg_match_mapping(torch.cat([batch_mask_arg_match_mask_reps, batch_mask_match_reps], dim=-1))
+                    batch_mask_subtype_match_reps = self._matching_func(batch_mask_t1_mask_reps, batch_mask_t2_mask_reps)
+                    batch_mask_type_match_mask_reps = self.type_match_mapping(torch.cat([batch_mask_type_match_mask_reps, batch_mask_subtype_match_reps], dim=-1))
         coref_logits = self.lm_head(batch_mask_reps)[:, label_word_id]
-        type_match_logits = self.lm_head(batch_type_match_mask_reps)[:, match_label_word_id]
-        arg_match_logits = self.lm_head(batch_arg_match_mask_reps)[:, match_label_word_id]
+        if not self.remove_match:
+            type_match_logits = self.lm_head(batch_type_match_mask_reps)[:, match_label_word_id]
+            arg_match_logits = self.lm_head(batch_arg_match_mask_reps)[:, match_label_word_id]
         e1_type_logits = self.lm_head(batch_t1_mask_reps)[:, subtype_label_word_id]
         e2_type_logits = self.lm_head(batch_t2_mask_reps)[:, subtype_label_word_id]
         if batch_mask_inputs is not None:
             mask_coref_logits = self.lm_head(batch_mask_mask_reps)[:, label_word_id]
-            mask_type_match_logits = self.lm_head(batch_mask_type_match_mask_reps)[:, match_label_word_id]
-            mask_arg_match_logits = self.lm_head(batch_mask_arg_match_mask_reps)[:, match_label_word_id]
+            if not self.remove_match:
+                mask_type_match_logits = self.lm_head(batch_mask_type_match_mask_reps)[:, match_label_word_id]
+                mask_arg_match_logits = self.lm_head(batch_mask_arg_match_mask_reps)[:, match_label_word_id]
             mask_e1_type_logits = self.lm_head(batch_mask_t1_mask_reps)[:, subtype_label_word_id]
             mask_e2_type_logits = self.lm_head(batch_mask_t2_mask_reps)[:, subtype_label_word_id]
 
@@ -639,14 +667,20 @@ class RobertaForMixPrompt(RobertaPreTrainedModel):
         if labels is not None:
             loss_fct = CrossEntropyLoss()
             coref_loss = loss_fct(coref_logits, labels)
-            match_loss = 0.5 * loss_fct(type_match_logits, subtype_match_labels) + 0.5 * loss_fct(arg_match_logits, arg_match_labels)
             subtype_loss = 0.5 * loss_fct(e1_type_logits, e1_subtype_labels) + 0.5 * loss_fct(e2_type_logits, e2_subtype_labels)
-            loss = torch.log(1 + coref_loss) + torch.log(1 + match_loss) + torch.log(1 + subtype_loss)
+            if not self.remove_match:
+                match_loss = 0.5 * loss_fct(type_match_logits, subtype_match_labels) + 0.5 * loss_fct(arg_match_logits, arg_match_labels)
+                loss = torch.log(1 + coref_loss) + torch.log(1 + match_loss) + torch.log(1 + subtype_loss)
+            else:
+                loss = torch.log(1 + coref_loss) + torch.log(1 + subtype_loss)
             if batch_mask_inputs is not None:
                 mask_coref_loss = loss_fct(mask_coref_logits, labels)
-                mask_match_loss = 0.5 * loss_fct(mask_type_match_logits, subtype_match_labels) + 0.5 * loss_fct(mask_arg_match_logits, arg_match_labels)
                 mask_subtype_loss = 0.5 * loss_fct(mask_e1_type_logits, e1_subtype_labels) + 0.5 * loss_fct(mask_e2_type_logits, e2_subtype_labels)
-                mask_loss = torch.log(1 + mask_coref_loss) + torch.log(1 + mask_match_loss) + torch.log(1 + mask_subtype_loss)
+                if not self.remove_match:
+                    mask_match_loss = 0.5 * loss_fct(mask_type_match_logits, subtype_match_labels) + 0.5 * loss_fct(mask_arg_match_logits, arg_match_labels)
+                    mask_loss = torch.log(1 + mask_coref_loss) + torch.log(1 + mask_match_loss) + torch.log(1 + mask_subtype_loss)
+                else:
+                    mask_loss = torch.log(1 + mask_coref_loss) + torch.log(1 + mask_subtype_loss)
                 loss = 0.5 * loss + 0.5 * mask_loss
         return loss, coref_logits
     
@@ -658,12 +692,14 @@ class DebertaForMixPrompt(DebertaV2PreTrainedModel):
         self.hidden_size = config.hidden_size
         self.matching_style = args.matching_style
         self.use_device = args.device
+        self.remove_match = (args.prompt_type == 'ma_remove-match')
         if self.matching_style != 'none':
             self.span_extractor = SelfAttentiveSpanExtractor(input_dim=self.hidden_size)
             if self.matching_style == 'product':
                 self.coref_mapping = nn.Linear(2 * self.hidden_size, self.hidden_size)
-                self.type_match_mapping = nn.Linear(2 * self.hidden_size, self.hidden_size)
-                self.arg_match_mapping = nn.Linear(2 * self.hidden_size, self.hidden_size)
+                if not self.remove_match:
+                    self.type_match_mapping = nn.Linear(2 * self.hidden_size, self.hidden_size)
+                    self.arg_match_mapping = nn.Linear(2 * self.hidden_size, self.hidden_size)
             else:
                 self.cosine_space_dim, self.cosine_slices, self.tensor_factor = (
                     args.cosine_space_dim, args.cosine_slices, args.cosine_factor
@@ -673,12 +709,14 @@ class DebertaForMixPrompt(DebertaV2PreTrainedModel):
                 self.cosine_mat_q = nn.Parameter(torch.rand((self.tensor_factor, self.cosine_space_dim), requires_grad=True))
                 if self.matching_style == 'cosine':
                     self.coref_mapping = nn.Linear(self.hidden_size + self.cosine_slices, self.hidden_size)
-                    self.type_match_mapping = nn.Linear(self.hidden_size + self.cosine_slices, self.hidden_size)
-                    self.arg_match_mapping = nn.Linear(self.hidden_size + self.cosine_slices, self.hidden_size)
+                    if not self.remove_match:
+                        self.type_match_mapping = nn.Linear(self.hidden_size + self.cosine_slices, self.hidden_size)
+                        self.arg_match_mapping = nn.Linear(self.hidden_size + self.cosine_slices, self.hidden_size)
                 elif self.matching_style == 'product_cosine':
                     self.coref_mapping = nn.Linear(2 * self.hidden_size + self.cosine_slices, self.hidden_size)
-                    self.type_match_mapping = nn.Linear(2 * self.hidden_size + self.cosine_slices, self.hidden_size)
-                    self.arg_match_mapping = nn.Linear(2 * self.hidden_size + self.cosine_slices, self.hidden_size)
+                    if not self.remove_match:
+                        self.type_match_mapping = nn.Linear(2 * self.hidden_size + self.cosine_slices, self.hidden_size)
+                        self.arg_match_mapping = nn.Linear(2 * self.hidden_size + self.cosine_slices, self.hidden_size)
         self.post_init()
     
     def get_output_embeddings(self):
@@ -705,24 +743,27 @@ class DebertaForMixPrompt(DebertaV2PreTrainedModel):
         return batch_e1_e2_match
 
     def forward(self, 
-        batch_inputs, batch_mask_idx, batch_type_match_mask_idx, batch_arg_match_mask_idx, 
+        batch_inputs, batch_mask_idx, 
         batch_event_idx, batch_t1_mask_idx, batch_t2_mask_idx, 
-        label_word_id, match_label_word_id, subtype_label_word_id, 
-        batch_mask_inputs=None, labels=None, subtype_match_labels=None, arg_match_labels=None, e1_subtype_labels=None, e2_subtype_labels=None
+        label_word_id, subtype_label_word_id, match_label_word_id=None, 
+        batch_mask_inputs=None, batch_type_match_mask_idx=None, batch_arg_match_mask_idx=None, 
+        labels=None, subtype_match_labels=None, arg_match_labels=None, e1_subtype_labels=None, e2_subtype_labels=None
         ):
         outputs = self.deberta(**batch_inputs)
         sequence_output = outputs.last_hidden_state
         batch_mask_reps = batched_index_select(sequence_output, 1, batch_mask_idx.unsqueeze(-1)).squeeze(1)
-        batch_type_match_mask_reps = batched_index_select(sequence_output, 1, batch_type_match_mask_idx.unsqueeze(-1)).squeeze(1)
-        batch_arg_match_mask_reps = batched_index_select(sequence_output, 1, batch_arg_match_mask_idx.unsqueeze(-1)).squeeze(1)
+        if not self.remove_match:
+            batch_type_match_mask_reps = batched_index_select(sequence_output, 1, batch_type_match_mask_idx.unsqueeze(-1)).squeeze(1)
+            batch_arg_match_mask_reps = batched_index_select(sequence_output, 1, batch_arg_match_mask_idx.unsqueeze(-1)).squeeze(1)
         batch_t1_mask_reps = batched_index_select(sequence_output, 1, batch_t1_mask_idx.unsqueeze(-1)).squeeze(1)
         batch_t2_mask_reps = batched_index_select(sequence_output, 1, batch_t2_mask_idx.unsqueeze(-1)).squeeze(1)
         if batch_mask_inputs is not None:
             mask_outputs = self.deberta(**batch_mask_inputs)
             mask_sequence_output = mask_outputs.last_hidden_state
             batch_mask_mask_reps = batched_index_select(mask_sequence_output, 1, batch_mask_idx.unsqueeze(-1)).squeeze(1)
-            batch_mask_type_match_mask_reps = batched_index_select(mask_sequence_output, 1, batch_type_match_mask_idx.unsqueeze(-1)).squeeze(1)
-            batch_mask_arg_match_mask_reps = batched_index_select(mask_sequence_output, 1, batch_arg_match_mask_idx.unsqueeze(-1)).squeeze(1)
+            if not self.remove_match:
+                batch_mask_type_match_mask_reps = batched_index_select(mask_sequence_output, 1, batch_type_match_mask_idx.unsqueeze(-1)).squeeze(1)
+                batch_mask_arg_match_mask_reps = batched_index_select(mask_sequence_output, 1, batch_arg_match_mask_idx.unsqueeze(-1)).squeeze(1)
             batch_mask_t1_mask_reps = batched_index_select(mask_sequence_output, 1, batch_t1_mask_idx.unsqueeze(-1)).squeeze(1)
             batch_mask_t2_mask_reps = batched_index_select(mask_sequence_output, 1, batch_t2_mask_idx.unsqueeze(-1)).squeeze(1)
         if self.matching_style != 'none':
@@ -739,26 +780,30 @@ class DebertaForMixPrompt(DebertaV2PreTrainedModel):
             batch_event_2_reps = self.span_extractor(sequence_output, batch_e2_idx).squeeze(dim=1)
             batch_match_reps = self._matching_func(batch_event_1_reps, batch_event_2_reps)
             batch_mask_reps = self.coref_mapping(torch.cat([batch_mask_reps, batch_match_reps], dim=-1))
-            batch_arg_match_mask_reps = self.arg_match_mapping(torch.cat([batch_arg_match_mask_reps, batch_match_reps], dim=-1))
-            batch_subtype_match_reps = self._matching_func(batch_t1_mask_reps, batch_t2_mask_reps)
-            batch_type_match_mask_reps = self.type_match_mapping(torch.cat([batch_type_match_mask_reps, batch_subtype_match_reps], dim=-1))
+            if not self.remove_match:
+                batch_arg_match_mask_reps = self.arg_match_mapping(torch.cat([batch_arg_match_mask_reps, batch_match_reps], dim=-1))
+                batch_subtype_match_reps = self._matching_func(batch_t1_mask_reps, batch_t2_mask_reps)
+                batch_type_match_mask_reps = self.type_match_mapping(torch.cat([batch_type_match_mask_reps, batch_subtype_match_reps], dim=-1))
             if batch_mask_inputs is not None:
                 batch_mask_event_1_reps = self.span_extractor(mask_sequence_output, batch_e1_idx).squeeze(dim=1)
                 batch_mask_event_2_reps = self.span_extractor(mask_sequence_output, batch_e2_idx).squeeze(dim=1)
                 batch_mask_match_reps = self._matching_func(batch_mask_event_1_reps, batch_mask_event_2_reps)
                 batch_mask_mask_reps = self.coref_mapping(torch.cat([batch_mask_mask_reps, batch_mask_match_reps], dim=-1))
-                batch_mask_arg_match_mask_reps = self.arg_match_mapping(torch.cat([batch_mask_arg_match_mask_reps, batch_mask_match_reps], dim=-1))
-                batch_mask_subtype_match_reps = self._matching_func(batch_mask_t1_mask_reps, batch_mask_t2_mask_reps)
-                batch_mask_type_match_mask_reps = self.type_match_mapping(torch.cat([batch_mask_type_match_mask_reps, batch_mask_subtype_match_reps], dim=-1))
+                if not self.remove_match:
+                    batch_mask_arg_match_mask_reps = self.arg_match_mapping(torch.cat([batch_mask_arg_match_mask_reps, batch_mask_match_reps], dim=-1))
+                    batch_mask_subtype_match_reps = self._matching_func(batch_mask_t1_mask_reps, batch_mask_t2_mask_reps)
+                    batch_mask_type_match_mask_reps = self.type_match_mapping(torch.cat([batch_mask_type_match_mask_reps, batch_mask_subtype_match_reps], dim=-1))
         coref_logits = self.cls(batch_mask_reps)[:, label_word_id]
-        type_match_logits = self.cls(batch_type_match_mask_reps)[:, match_label_word_id]
-        arg_match_logits = self.cls(batch_arg_match_mask_reps)[:, match_label_word_id]
+        if not self.remove_match:
+            type_match_logits = self.cls(batch_type_match_mask_reps)[:, match_label_word_id]
+            arg_match_logits = self.cls(batch_arg_match_mask_reps)[:, match_label_word_id]
         e1_type_logits = self.cls(batch_t1_mask_reps)[:, subtype_label_word_id]
         e2_type_logits = self.cls(batch_t2_mask_reps)[:, subtype_label_word_id]
         if batch_mask_inputs is not None:
             mask_coref_logits = self.cls(batch_mask_mask_reps)[:, label_word_id]
-            mask_type_match_logits = self.cls(batch_mask_type_match_mask_reps)[:, match_label_word_id]
-            mask_arg_match_logits = self.cls(batch_mask_arg_match_mask_reps)[:, match_label_word_id]
+            if not self.remove_match:
+                mask_type_match_logits = self.cls(batch_mask_type_match_mask_reps)[:, match_label_word_id]
+                mask_arg_match_logits = self.cls(batch_mask_arg_match_mask_reps)[:, match_label_word_id]
             mask_e1_type_logits = self.cls(batch_mask_t1_mask_reps)[:, subtype_label_word_id]
             mask_e2_type_logits = self.cls(batch_mask_t2_mask_reps)[:, subtype_label_word_id]
 
@@ -766,14 +811,20 @@ class DebertaForMixPrompt(DebertaV2PreTrainedModel):
         if labels is not None:
             loss_fct = CrossEntropyLoss()
             coref_loss = loss_fct(coref_logits, labels)
-            match_loss = 0.5 * loss_fct(type_match_logits, subtype_match_labels) + 0.5 * loss_fct(arg_match_logits, arg_match_labels)
             subtype_loss = 0.5 * loss_fct(e1_type_logits, e1_subtype_labels) + 0.5 * loss_fct(e2_type_logits, e2_subtype_labels)
-            loss = torch.log(1 + coref_loss) + torch.log(1 + match_loss) + torch.log(1 + subtype_loss)
+            if not self.remove_match:
+                match_loss = 0.5 * loss_fct(type_match_logits, subtype_match_labels) + 0.5 * loss_fct(arg_match_logits, arg_match_labels)
+                loss = torch.log(1 + coref_loss) + torch.log(1 + match_loss) + torch.log(1 + subtype_loss)
+            else:
+                loss = torch.log(1 + coref_loss) + torch.log(1 + subtype_loss)
             if batch_mask_inputs is not None:
                 mask_coref_loss = loss_fct(mask_coref_logits, labels)
-                mask_match_loss = 0.5 * loss_fct(mask_type_match_logits, subtype_match_labels) + 0.5 * loss_fct(mask_arg_match_logits, arg_match_labels)
                 mask_subtype_loss = 0.5 * loss_fct(mask_e1_type_logits, e1_subtype_labels) + 0.5 * loss_fct(mask_e2_type_logits, e2_subtype_labels)
-                mask_loss = torch.log(1 + mask_coref_loss) + torch.log(1 + mask_match_loss) + torch.log(1 + mask_subtype_loss)
+                if not self.remove_match:
+                    mask_match_loss = 0.5 * loss_fct(mask_type_match_logits, subtype_match_labels) + 0.5 * loss_fct(mask_arg_match_logits, arg_match_labels)
+                    mask_loss = torch.log(1 + mask_coref_loss) + torch.log(1 + mask_match_loss) + torch.log(1 + mask_subtype_loss)
+                else:
+                    mask_loss = torch.log(1 + mask_coref_loss) + torch.log(1 + mask_subtype_loss)
                 loss = 0.5 * loss + 0.5 * mask_loss
         return loss, coref_logits
 
@@ -785,12 +836,14 @@ class LongformerForMixPrompt(LongformerPreTrainedModel):
         self.hidden_size = config.hidden_size
         self.matching_style = args.matching_style
         self.use_device = args.device
+        self.remove_match = (args.prompt_type == 'ma_remove-match')
         if self.matching_style != 'none':
             self.span_extractor = SelfAttentiveSpanExtractor(input_dim=self.hidden_size)
             if self.matching_style == 'product':
                 self.coref_mapping = nn.Linear(2 * self.hidden_size, self.hidden_size)
-                self.type_match_mapping = nn.Linear(2 * self.hidden_size, self.hidden_size)
-                self.arg_match_mapping = nn.Linear(2 * self.hidden_size, self.hidden_size)
+                if not self.remove_match:
+                    self.type_match_mapping = nn.Linear(2 * self.hidden_size, self.hidden_size)
+                    self.arg_match_mapping = nn.Linear(2 * self.hidden_size, self.hidden_size)
             else:
                 self.cosine_space_dim, self.cosine_slices, self.tensor_factor = (
                     args.cosine_space_dim, args.cosine_slices, args.cosine_factor
@@ -800,12 +853,14 @@ class LongformerForMixPrompt(LongformerPreTrainedModel):
                 self.cosine_ffnn = nn.Linear(self.hidden_size, self.cosine_space_dim)
                 if self.matching_style == 'cosine':
                     self.coref_mapping = nn.Linear(self.hidden_size + self.cosine_slices, self.hidden_size)
-                    self.type_match_mapping = nn.Linear(self.hidden_size + self.cosine_slices, self.hidden_size)
-                    self.arg_match_mapping = nn.Linear(self.hidden_size + self.cosine_slices, self.hidden_size)
+                    if not self.remove_match:
+                        self.type_match_mapping = nn.Linear(self.hidden_size + self.cosine_slices, self.hidden_size)
+                        self.arg_match_mapping = nn.Linear(self.hidden_size + self.cosine_slices, self.hidden_size)
                 elif self.matching_style == 'product_cosine':
                     self.coref_mapping = nn.Linear(2 * self.hidden_size + self.cosine_slices, self.hidden_size)
-                    self.type_match_mapping = nn.Linear(2 * self.hidden_size + self.cosine_slices, self.hidden_size)
-                    self.arg_match_mapping = nn.Linear(2 * self.hidden_size + self.cosine_slices, self.hidden_size)
+                    if not self.remove_match:
+                        self.type_match_mapping = nn.Linear(2 * self.hidden_size + self.cosine_slices, self.hidden_size)
+                        self.arg_match_mapping = nn.Linear(2 * self.hidden_size + self.cosine_slices, self.hidden_size)
         self.post_init()
     
     def get_output_embeddings(self):
@@ -832,10 +887,11 @@ class LongformerForMixPrompt(LongformerPreTrainedModel):
         return batch_e1_e2_match
 
     def forward(self, 
-        batch_inputs, batch_mask_idx, batch_type_match_mask_idx, batch_arg_match_mask_idx, 
+        batch_inputs, batch_mask_idx, 
         batch_event_idx, batch_t1_mask_idx, batch_t2_mask_idx, 
-        label_word_id, match_label_word_id, subtype_label_word_id, 
-        batch_mask_inputs=None, labels=None, subtype_match_labels=None, arg_match_labels=None, e1_subtype_labels=None, e2_subtype_labels=None
+        label_word_id, subtype_label_word_id, match_label_word_id=None, 
+        batch_mask_inputs=None, batch_type_match_mask_idx=None, batch_arg_match_mask_idx=None, 
+        labels=None, subtype_match_labels=None, arg_match_labels=None, e1_subtype_labels=None, e2_subtype_labels=None
         ):
         # global attention on event tokens
         global_attention_mask = torch.zeros_like(batch_inputs['input_ids'])
@@ -849,16 +905,18 @@ class LongformerForMixPrompt(LongformerPreTrainedModel):
         outputs = self.longformer(**batch_inputs)
         sequence_output = outputs.last_hidden_state
         batch_mask_reps = batched_index_select(sequence_output, 1, batch_mask_idx.unsqueeze(-1)).squeeze(1)
-        batch_type_match_mask_reps = batched_index_select(sequence_output, 1, batch_type_match_mask_idx.unsqueeze(-1)).squeeze(1)
-        batch_arg_match_mask_reps = batched_index_select(sequence_output, 1, batch_arg_match_mask_idx.unsqueeze(-1)).squeeze(1)
+        if not self.remove_match:
+            batch_type_match_mask_reps = batched_index_select(sequence_output, 1, batch_type_match_mask_idx.unsqueeze(-1)).squeeze(1)
+            batch_arg_match_mask_reps = batched_index_select(sequence_output, 1, batch_arg_match_mask_idx.unsqueeze(-1)).squeeze(1)
         batch_t1_mask_reps = batched_index_select(sequence_output, 1, batch_t1_mask_idx.unsqueeze(-1)).squeeze(1)
         batch_t2_mask_reps = batched_index_select(sequence_output, 1, batch_t2_mask_idx.unsqueeze(-1)).squeeze(1)
         if batch_mask_inputs is not None:
             mask_outputs = self.longformer(**batch_mask_inputs)
             mask_sequence_output = mask_outputs.last_hidden_state
             batch_mask_mask_reps = batched_index_select(mask_sequence_output, 1, batch_mask_idx.unsqueeze(-1)).squeeze(1)
-            batch_mask_type_match_mask_reps = batched_index_select(mask_sequence_output, 1, batch_type_match_mask_idx.unsqueeze(-1)).squeeze(1)
-            batch_mask_arg_match_mask_reps = batched_index_select(mask_sequence_output, 1, batch_arg_match_mask_idx.unsqueeze(-1)).squeeze(1)
+            if not self.remove_match:
+                batch_mask_type_match_mask_reps = batched_index_select(mask_sequence_output, 1, batch_type_match_mask_idx.unsqueeze(-1)).squeeze(1)
+                batch_mask_arg_match_mask_reps = batched_index_select(mask_sequence_output, 1, batch_arg_match_mask_idx.unsqueeze(-1)).squeeze(1)
             batch_mask_t1_mask_reps = batched_index_select(mask_sequence_output, 1, batch_t1_mask_idx.unsqueeze(-1)).squeeze(1)
             batch_mask_t2_mask_reps = batched_index_select(mask_sequence_output, 1, batch_t2_mask_idx.unsqueeze(-1)).squeeze(1)
         if self.matching_style != 'none':
@@ -875,26 +933,30 @@ class LongformerForMixPrompt(LongformerPreTrainedModel):
             batch_event_2_reps = self.span_extractor(sequence_output, batch_e2_idx).squeeze(dim=1)
             batch_match_reps = self._matching_func(batch_event_1_reps, batch_event_2_reps)
             batch_mask_reps = self.coref_mapping(torch.cat([batch_mask_reps, batch_match_reps], dim=-1))
-            batch_arg_match_mask_reps = self.arg_match_mapping(torch.cat([batch_arg_match_mask_reps, batch_match_reps], dim=-1))
-            batch_subtype_match_reps = self._matching_func(batch_t1_mask_reps, batch_t2_mask_reps)
-            batch_type_match_mask_reps = self.type_match_mapping(torch.cat([batch_type_match_mask_reps, batch_subtype_match_reps], dim=-1))
+            if not self.remove_match:
+                batch_arg_match_mask_reps = self.arg_match_mapping(torch.cat([batch_arg_match_mask_reps, batch_match_reps], dim=-1))
+                batch_subtype_match_reps = self._matching_func(batch_t1_mask_reps, batch_t2_mask_reps)
+                batch_type_match_mask_reps = self.type_match_mapping(torch.cat([batch_type_match_mask_reps, batch_subtype_match_reps], dim=-1))
             if batch_mask_inputs is not None:
                 batch_mask_event_1_reps = self.span_extractor(mask_sequence_output, batch_e1_idx).squeeze(dim=1)
                 batch_mask_event_2_reps = self.span_extractor(mask_sequence_output, batch_e2_idx).squeeze(dim=1)
                 batch_mask_match_reps = self._matching_func(batch_mask_event_1_reps, batch_mask_event_2_reps)
                 batch_mask_mask_reps = self.coref_mapping(torch.cat([batch_mask_mask_reps, batch_mask_match_reps], dim=-1))
-                batch_mask_arg_match_mask_reps = self.arg_match_mapping(torch.cat([batch_mask_arg_match_mask_reps, batch_mask_match_reps], dim=-1))
-                batch_mask_subtype_match_reps = self._matching_func(batch_mask_t1_mask_reps, batch_mask_t2_mask_reps)
-                batch_mask_type_match_mask_reps = self.type_match_mapping(torch.cat([batch_mask_type_match_mask_reps, batch_mask_subtype_match_reps], dim=-1))
+                if not self.remove_match:
+                    batch_mask_arg_match_mask_reps = self.arg_match_mapping(torch.cat([batch_mask_arg_match_mask_reps, batch_mask_match_reps], dim=-1))
+                    batch_mask_subtype_match_reps = self._matching_func(batch_mask_t1_mask_reps, batch_mask_t2_mask_reps)
+                    batch_mask_type_match_mask_reps = self.type_match_mapping(torch.cat([batch_mask_type_match_mask_reps, batch_mask_subtype_match_reps], dim=-1))
         coref_logits = self.lm_head(batch_mask_reps)[:, label_word_id]
-        type_match_logits = self.lm_head(batch_type_match_mask_reps)[:, match_label_word_id]
-        arg_match_logits = self.lm_head(batch_arg_match_mask_reps)[:, match_label_word_id]
+        if not self.remove_match:
+            type_match_logits = self.lm_head(batch_type_match_mask_reps)[:, match_label_word_id]
+            arg_match_logits = self.lm_head(batch_arg_match_mask_reps)[:, match_label_word_id]
         e1_type_logits = self.lm_head(batch_t1_mask_reps)[:, subtype_label_word_id]
         e2_type_logits = self.lm_head(batch_t2_mask_reps)[:, subtype_label_word_id]
         if batch_mask_inputs is not None:
             mask_coref_logits = self.lm_head(batch_mask_mask_reps)[:, label_word_id]
-            mask_type_match_logits = self.lm_head(batch_mask_type_match_mask_reps)[:, match_label_word_id]
-            mask_arg_match_logits = self.lm_head(batch_mask_arg_match_mask_reps)[:, match_label_word_id]
+            if not self.remove_match:
+                mask_type_match_logits = self.lm_head(batch_mask_type_match_mask_reps)[:, match_label_word_id]
+                mask_arg_match_logits = self.lm_head(batch_mask_arg_match_mask_reps)[:, match_label_word_id]
             mask_e1_type_logits = self.lm_head(batch_mask_t1_mask_reps)[:, subtype_label_word_id]
             mask_e2_type_logits = self.lm_head(batch_mask_t2_mask_reps)[:, subtype_label_word_id]
 
@@ -902,14 +964,20 @@ class LongformerForMixPrompt(LongformerPreTrainedModel):
         if labels is not None:
             loss_fct = CrossEntropyLoss()
             coref_loss = loss_fct(coref_logits, labels)
-            match_loss = 0.5 * loss_fct(type_match_logits, subtype_match_labels) + 0.5 * loss_fct(arg_match_logits, arg_match_labels)
             subtype_loss = 0.5 * loss_fct(e1_type_logits, e1_subtype_labels) + 0.5 * loss_fct(e2_type_logits, e2_subtype_labels)
-            loss = torch.log(1 + coref_loss) + torch.log(1 + match_loss) + torch.log(1 + subtype_loss)
+            if not self.remove_match:
+                match_loss = 0.5 * loss_fct(type_match_logits, subtype_match_labels) + 0.5 * loss_fct(arg_match_logits, arg_match_labels)
+                loss = torch.log(1 + coref_loss) + torch.log(1 + match_loss) + torch.log(1 + subtype_loss)
+            else:
+                loss = torch.log(1 + coref_loss) + torch.log(1 + subtype_loss)
             if batch_mask_inputs is not None:
                 mask_coref_loss = loss_fct(mask_coref_logits, labels)
-                mask_match_loss = 0.5 * loss_fct(mask_type_match_logits, subtype_match_labels) + 0.5 * loss_fct(mask_arg_match_logits, arg_match_labels)
                 mask_subtype_loss = 0.5 * loss_fct(mask_e1_type_logits, e1_subtype_labels) + 0.5 * loss_fct(mask_e2_type_logits, e2_subtype_labels)
-                mask_loss = torch.log(1 + mask_coref_loss) + torch.log(1 + mask_match_loss) + torch.log(1 + mask_subtype_loss)
+                if not self.remove_match:
+                    mask_match_loss = 0.5 * loss_fct(mask_type_match_logits, subtype_match_labels) + 0.5 * loss_fct(mask_arg_match_logits, arg_match_labels)
+                    mask_loss = torch.log(1 + mask_coref_loss) + torch.log(1 + mask_match_loss) + torch.log(1 + mask_subtype_loss)
+                else:
+                    mask_loss = torch.log(1 + mask_coref_loss) + torch.log(1 + mask_subtype_loss)
                 loss = 0.5 * loss + 0.5 * mask_loss
         return loss, coref_logits
 

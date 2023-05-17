@@ -601,6 +601,121 @@ def get_dataLoader(args, dataset, tokenizer, prompt_type:str, verbalizer:dict, w
             'e2_subtype_labels': batch_e2_type_labels
         }
     
+    def mix_nomatch_collote_fn(batch_samples):
+        batch_sen, batch_mask_idx, batch_event_idx = [], [], []
+        batch_e1_type_mask_idx, batch_e2_type_mask_idx = [], []
+        batch_labels = []
+        batch_e1_type_labels, batch_e2_type_labels = [], []
+        for sample in batch_samples:
+            batch_sen.append(sample['prompt'])
+            # convert char offsets to token idxs
+            encoding = tokenizer(sample['prompt'])
+            mask_idx = encoding.char_to_token(sample['mask_offset'])
+            e1s_idx, e1e_idx, e2s_idx, e2e_idx = (
+                encoding.char_to_token(sample['e1s_offset']), 
+                encoding.char_to_token(sample['e1e_offset']), 
+                encoding.char_to_token(sample['e2s_offset']), 
+                encoding.char_to_token(sample['e2e_offset'])
+            )
+            e1_type_mask_idx, e2_type_mask_idx = (
+                encoding.char_to_token(sample['e1_type_mask_offset']), 
+                encoding.char_to_token(sample['e2_type_mask_offset'])
+            )
+            assert None not in [mask_idx, e1s_idx, e1e_idx, e2s_idx, e2e_idx, e1_type_mask_idx, e2_type_mask_idx]
+            batch_mask_idx.append(mask_idx)
+            batch_event_idx.append([e1s_idx, e1e_idx, e2s_idx, e2e_idx])
+            batch_e1_type_mask_idx.append(e1_type_mask_idx)
+            batch_e2_type_mask_idx.append(e2_type_mask_idx)
+            batch_labels.append(int(sample['label']))
+            batch_e1_type_labels.append(int(sample['e1_subtype_id']))
+            batch_e2_type_labels.append(int(sample['e2_subtype_id']))
+        batch_inputs = tokenizer(
+            batch_sen, 
+            max_length=args.max_seq_length, 
+            padding=True, 
+            truncation=True, 
+            return_tensors="pt"
+        )
+        return {
+            'batch_inputs': batch_inputs, 
+            'batch_mask_idx': batch_mask_idx, 
+            'batch_event_idx': batch_event_idx, 
+            'batch_t1_mask_idx': batch_e1_type_mask_idx, 
+            'batch_t2_mask_idx': batch_e2_type_mask_idx, 
+            'label_word_id': [neg_id, pos_id], 
+            'subtype_label_word_id': [event_type_ids[i] for i in range(len(EVENT_SUBTYPES) + 1)], 
+            'labels': batch_labels, 
+            'e1_subtype_labels': batch_e1_type_labels, 
+            'e2_subtype_labels': batch_e2_type_labels
+        }
+
+    def mix_nomatch_collote_fn_with_mask(batch_samples):
+        batch_sen = []
+        batch_mask_idx, batch_event_idx, batch_trigger_idx = [], [], []
+        batch_e1_type_mask_idx, batch_e2_type_mask_idx = [], []
+        batch_labels = []
+        batch_e1_type_labels, batch_e2_type_labels = [], []
+        for sample in batch_samples:
+            batch_sen.append(sample['prompt'])
+            # convert char offsets to token idxs
+            encoding = tokenizer(sample['prompt'])
+            mask_idx = encoding.char_to_token(sample['mask_offset'])
+            e1s_idx, e1e_idx, e2s_idx, e2e_idx = (
+                encoding.char_to_token(sample['e1s_offset']), 
+                encoding.char_to_token(sample['e1e_offset']), 
+                encoding.char_to_token(sample['e2s_offset']), 
+                encoding.char_to_token(sample['e2e_offset'])
+            )
+            trigger_idxs = [
+                [encoding.char_to_token(s) if encoding.char_to_token(s) else encoding.char_to_token(s+1), encoding.char_to_token(e)]
+                for s, e in sample['trigger_offsets']
+            ]
+            e1_type_mask_idx, e2_type_mask_idx = (
+                encoding.char_to_token(sample['e1_type_mask_offset']), 
+                encoding.char_to_token(sample['e2_type_mask_offset'])
+            )
+            assert None not in [mask_idx, e1s_idx, e1e_idx, e2s_idx, e2e_idx, e1_type_mask_idx, e2_type_mask_idx]
+            for s, e in trigger_idxs:
+                assert None not in [s, e]
+            batch_mask_idx.append(mask_idx)
+            batch_event_idx.append([e1s_idx, e1e_idx, e2s_idx, e2e_idx])
+            batch_trigger_idx.append(trigger_idxs)
+            batch_e1_type_mask_idx.append(e1_type_mask_idx)
+            batch_e2_type_mask_idx.append(e2_type_mask_idx)
+            batch_labels.append(int(sample['label']))
+            batch_e1_type_labels.append(int(sample['e1_subtype_id']))
+            batch_e2_type_labels.append(int(sample['e2_subtype_id']))
+        batch_inputs = tokenizer(
+            batch_sen, 
+            max_length=args.max_seq_length, 
+            padding=True, 
+            truncation=True, 
+            return_tensors="pt"
+        )
+        batch_mask_inputs = tokenizer(
+            batch_sen, 
+            max_length=args.max_seq_length, 
+            padding=True, 
+            truncation=True, 
+            return_tensors="pt"
+        )
+        for b_idx in range(len(batch_labels)):
+            for s, e in batch_trigger_idx[b_idx]:
+                batch_mask_inputs['input_ids'][b_idx][s:e+1] = tokenizer.mask_token_id
+        return {
+            'batch_inputs': batch_inputs, 
+            'batch_mask_inputs': batch_mask_inputs, 
+            'batch_mask_idx': batch_mask_idx, 
+            'batch_event_idx': batch_event_idx, 
+            'batch_t1_mask_idx': batch_e1_type_mask_idx, 
+            'batch_t2_mask_idx': batch_e2_type_mask_idx, 
+            'label_word_id': [neg_id, pos_id], 
+            'subtype_label_word_id': [event_type_ids[i] for i in range(len(EVENT_SUBTYPES) + 1)], 
+            'labels': batch_labels, 
+            'e1_subtype_labels': batch_e1_type_labels, 
+            'e2_subtype_labels': batch_e2_type_labels
+        }
+    
     def simp_mix_collote_fn(batch_samples):
         batch_sen, batch_mask_idx, batch_event_idx = [], [], []
         batch_type_match_mask_idx, batch_arg_match_mask_idx = [], []
@@ -728,6 +843,8 @@ def get_dataLoader(args, dataset, tokenizer, prompt_type:str, verbalizer:dict, w
     elif prompt_type.startswith('m'): # mix prompt
         if prompt_type == 'ma_remove-anchor': 
             select_collote_fn = simp_mix_collote_fn_with_mask if with_mask_input else simp_mix_collote_fn
+        elif prompt_type == 'ma_remove-match': 
+            select_collote_fn = mix_nomatch_collote_fn_with_mask if with_mask_input else mix_nomatch_collote_fn
         else:
             select_collote_fn = mix_collote_fn_with_mask if with_mask_input else mix_collote_fn
     else:
@@ -863,15 +980,17 @@ if __name__ == '__main__':
         print('batch_inputs shape:', {k: v.shape for k, v in batch_data['batch_inputs'].items()})
         print('batch_inputs: ', batch_data['batch_inputs'])
         print('batch_mask_idx:', batch_data['batch_mask_idx'])
-        print('batch_type_match_mask_idx', batch_data['batch_type_match_mask_idx'])
-        print('batch_arg_match_mask_idx', batch_data['batch_arg_match_mask_idx'])
+        if args.prompt_type != 'ma_remove-match': 
+            print('batch_type_match_mask_idx', batch_data['batch_type_match_mask_idx'])
+            print('batch_arg_match_mask_idx', batch_data['batch_arg_match_mask_idx'])
         print('batch_event_idx:', batch_data['batch_event_idx'])
         if args.prompt_type != 'ma_remove-anchor': 
             print('batch_t1_mask_idx:', batch_data['batch_t1_mask_idx'])
             print('batch_t2_mask_idx:', batch_data['batch_t2_mask_idx'])
         print('labels:', batch_data['labels'])
-        print('subtype_match_labels:', batch_data['subtype_match_labels'])
-        print('arg_match_labels:', batch_data['arg_match_labels'])
+        if args.prompt_type != 'ma_remove-match': 
+            print('subtype_match_labels:', batch_data['subtype_match_labels'])
+            print('arg_match_labels:', batch_data['arg_match_labels'])
         if args.prompt_type != 'ma_remove-anchor': 
             print('e1_subtype_labels:', batch_data['e1_subtype_labels'])
             print('e2_subtype_labels:', batch_data['e2_subtype_labels'])

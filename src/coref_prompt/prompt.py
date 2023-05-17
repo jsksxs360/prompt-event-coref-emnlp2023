@@ -10,7 +10,7 @@ PROMPT_TYPE = [
     'sn', 'sc', 'sq', 
     'm_ht_hn', 'm_ht_hc', 'm_ht_hq', 'm_hta_hn', 'm_hta_hc', 'm_hta_hq', # mix prompts
     'm_st_hn', 'm_st_hc', 'm_st_hq', 'm_sta_hn', 'm_sta_hc', 'm_sta_hq', 
-    'ma_remove-prefix', 'ma_remove-anchor' # mix prompt ablation
+    'ma_remove-prefix', 'ma_remove-anchor', 'ma_remove-match' # mix prompt ablation
 ]
 WORD_FILTER = set([
     'you', 'your', 'yours', 'yourself', 'yourselves', 
@@ -292,7 +292,7 @@ def create_mix_template(
     e1_trigger:str, e2_trigger:str, e1_arg_str: str, e2_arg_str: str, e1_related_str:str, e2_related_str:str, 
     prompt_type:str, s_tokens:dict
     ) -> dict:
-    remove_prefix_temp, remove_anchor_temp = False, False
+    remove_prefix_temp, remove_anchor_temp, remove_match = False, False, False
     if prompt_type.startswith('ma'): # mix ablation
         anchor_temp_type, inference_temp_type = 'hta', 'hn'
         ablation = prompt_type.split('_')[1]
@@ -300,6 +300,8 @@ def create_mix_template(
             remove_prefix_temp = True
         elif ablation == 'remove-anchor':
             remove_anchor_temp = True
+        elif ablation == 'remove-match':
+            remove_match = True
     else:
         _, anchor_temp_type, inference_temp_type = prompt_type.split('_')
     
@@ -354,8 +356,12 @@ def create_mix_template(
     infer_trigger_offsets.append([len(infer_template), len(infer_template) + len(e1_trigger) - 1])
     infer_template += f"{e1_trigger} {s_tokens['e1e']} and {s_tokens['e2s']} "
     infer_trigger_offsets.append([len(infer_template), len(infer_template) + len(e2_trigger) - 1])
-    infer_template += f"{e2_trigger} {s_tokens['e2e']} have {s_tokens['mask']} event type and {s_tokens['mask']} participants"
-    if inference_temp_type == 'hn': 
+    infer_template += f"{e2_trigger} {s_tokens['e2e']}"
+    if not remove_match:
+        infer_template += f" have {s_tokens['mask']} event type and {s_tokens['mask']} participants"
+    if remove_match:
+        infer_template += f" refer to {s_tokens['mask']} event."
+    elif inference_temp_type == 'hn': 
         infer_template += f", so they refer to {s_tokens['mask']} event."
     elif inference_temp_type == 'hc': 
         infer_template += f". So the event expressed by {s_tokens['e1s']} "
@@ -375,7 +381,8 @@ def create_mix_template(
     ]
     if not remove_anchor_temp:
         special_tokens += [s_tokens[f'st{i}'] for i in range(len(EVENT_SUBTYPES) + 1)]
-    special_tokens += [s_tokens['match'], s_tokens['mismatch']]
+    if not remove_match:
+        special_tokens += [s_tokens['match'], s_tokens['mismatch']]
     if 'c' in inference_temp_type: # connect template
         special_tokens += [s_tokens['refer'], s_tokens['no_refer']]
     return {
@@ -561,7 +568,7 @@ def create_prompt(
             'trigger_offsets': trigger_offsets
         }
     elif prompt_type.startswith('m'): # mix prompt
-        remove_anchor_temp = (prompt_type == 'ma_remove-anchor')
+        remove_anchor_temp, remove_match = (prompt_type == 'ma_remove-anchor'), (prompt_type == 'ma_remove-match')
         e1_arg_str, e2_arg_str, e1_related_str, e2_related_str, special_tokens = create_arg_and_related_info_str(
             prompt_type, e1_related_info, e2_related_info, select_arg_strategy, special_token_dict
         )
@@ -645,11 +652,14 @@ def create_prompt(
                 for s, e in infer_trigger_offsets
             ]
         mask_offsets = list(findall(special_token_dict['mask'], prompt))
-        assert len(mask_offsets) == (3 if remove_anchor_temp else 5)
+        assert len(mask_offsets) == (3 if remove_anchor_temp or remove_match else 5)
         if remove_anchor_temp:
             type_match_mask_offset, arg_match_mask_offset, mask_offset = mask_offsets
         else:
-            e1_type_mask_offset, e2_type_mask_offset, type_match_mask_offset, arg_match_mask_offset, mask_offset = mask_offsets
+            if remove_match:
+                e1_type_mask_offset, e2_type_mask_offset, mask_offset = mask_offsets
+            else:
+                e1_type_mask_offset, e2_type_mask_offset, type_match_mask_offset, arg_match_mask_offset, mask_offset = mask_offsets
             tri1s_context_offset, tri1e_context_offset = e1s_context_offset + len(special_token_dict['e1s']) + 1, e1e_context_offset - 2
             tri2s_context_offset, tri2e_context_offset = e2s_context_offset + len(special_token_dict['e2s']) + 1, e2e_context_offset - 2
             trigger_offsets.append([tri1s_context_offset, tri1e_context_offset])
@@ -661,8 +671,9 @@ def create_prompt(
         trigger_offsets.append([tri1s_offset, tri1e_offset])
         trigger_offsets.append([tri2s_offset, tri2e_offset])
         trigger_offsets += infer_trigger_offsets
-        assert prompt[type_match_mask_offset:type_match_mask_offset + len(special_token_dict['mask'])] == special_token_dict['mask']
-        assert prompt[arg_match_mask_offset:arg_match_mask_offset + len(special_token_dict['mask'])] == special_token_dict['mask']
+        if not remove_match:
+            assert prompt[type_match_mask_offset:type_match_mask_offset + len(special_token_dict['mask'])] == special_token_dict['mask']
+            assert prompt[arg_match_mask_offset:arg_match_mask_offset + len(special_token_dict['mask'])] == special_token_dict['mask']
         assert prompt[mask_offset:mask_offset + len(special_token_dict['mask'])] == special_token_dict['mask']
         assert prompt[e1s_offset:e1e_offset] == special_token_dict['e1s'] + ' ' + e1_trigger + ' '
         assert prompt[e1e_offset:e1e_offset + len(special_token_dict['e1e'])] == special_token_dict['e1e']
@@ -673,8 +684,8 @@ def create_prompt(
         return {
             'prompt': prompt, 
             'mask_offset': mask_offset, 
-            'type_match_mask_offset': type_match_mask_offset, 
-            'arg_match_mask_offset': arg_match_mask_offset, 
+            'type_match_mask_offset': -1 if remove_match else type_match_mask_offset, 
+            'arg_match_mask_offset': -1 if remove_match else arg_match_mask_offset, 
             'e1s_offset': e1s_offset, 
             'e1e_offset': e1e_offset, 
             'e1_type_mask_offset': -1 if remove_anchor_temp else e1_type_mask_offset, 
