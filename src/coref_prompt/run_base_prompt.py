@@ -13,7 +13,7 @@ from src.tools import seed_everything, NpEncoder
 from src.coref_prompt.arg import parse_args
 from src.coref_prompt.data import KBPCoref, KBPCorefTiny, get_dataLoader
 from src.coref_prompt.data import get_pred_related_info
-from src.coref_prompt.modeling import BertForBasePrompt, RobertaForBasePrompt, DebertaForBasePrompt, LongformerForBasePrompt
+from src.coref_prompt.modeling import BertForBasePrompt, RobertaForBasePrompt
 from src.coref_prompt.prompt import create_prompt, create_verbalizer, get_special_tokens
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
@@ -23,9 +23,7 @@ logger = logging.getLogger("Model")
 
 BASE_PROMPT_MODELS = {
     'bert': BertForBasePrompt,
-    'roberta': RobertaForBasePrompt, 
-    'deberta': DebertaForBasePrompt, 
-    'longformer': LongformerForBasePrompt
+    'roberta': RobertaForBasePrompt
 }
 
 def to_device(args, batch_data):
@@ -281,7 +279,8 @@ if __name__ == '__main__':
                 tokenizer=tokenizer, 
                 max_length=args.max_seq_length, 
                 sample_strategy=args.sample_strategy, 
-                neg_top_k=args.neg_top_k
+                neg_top_k=args.neg_top_k, 
+                rand_seed=args.seed
             )
         labels = [train_dataset[s_idx]['label'] for s_idx in range(len(train_dataset))]
         logger.info(f"[Train] Coref: {labels.count(1)} non-Coref: {labels.count(0)}")

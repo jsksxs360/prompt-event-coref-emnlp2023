@@ -13,8 +13,8 @@ from src.tools import seed_everything, NpEncoder
 from src.coref_prompt.arg import parse_args
 from src.coref_prompt.data import KBPCoref, KBPCorefTiny, get_dataLoader
 from src.coref_prompt.data import get_pred_related_info
-from src.coref_prompt.modeling import BertForMixPrompt, RobertaForMixPrompt, DebertaForMixPrompt, LongformerForMixPrompt
-from src.coref_prompt.modeling import BertForSimpMixPrompt, RobertaForSimpMixPrompt, DebertaForSimpMixPrompt, LongformerForSimpMixPrompt
+from src.coref_prompt.modeling import BertForMixPrompt, RobertaForMixPrompt
+from src.coref_prompt.modeling import BertForSimpMixPrompt, RobertaForSimpMixPrompt
 from src.coref_prompt.prompt import EVENT_SUBTYPES, id2subtype
 from src.coref_prompt.prompt import create_prompt, create_verbalizer, get_special_tokens
 
@@ -25,15 +25,11 @@ logger = logging.getLogger("Model")
 
 MIX_PROMPT_MODELS = {
     'bert': BertForMixPrompt, 
-    'roberta': RobertaForMixPrompt, 
-    'deberta': DebertaForMixPrompt, 
-    'longformer': LongformerForMixPrompt
+    'roberta': RobertaForMixPrompt
 }
 SIMP_MIX_PROMPT_MODELS = {
     'bert': BertForSimpMixPrompt, 
-    'roberta': RobertaForSimpMixPrompt, 
-    'deberta': DebertaForSimpMixPrompt, 
-    'longformer': LongformerForSimpMixPrompt
+    'roberta': RobertaForSimpMixPrompt
 }
 
 def to_device(args, batch_data):
@@ -299,7 +295,7 @@ if __name__ == '__main__':
     # build verbalizer
     verbalizer = create_verbalizer(tokenizer, args.model_type, args.prompt_type)
     logger.info(f"verbalizer: {verbalizer}")
-    if 'c' in args.prompt_type:
+    if 'c' in args.prompt_type and not args.prompt_type.startswith('ma'):
         logger.info(f"initialize embeddings for {verbalizer['coref']['token']} and {verbalizer['non-coref']['token']}...")
         subtype_sp_token_num = len(EVENT_SUBTYPES) + 1
         match_sp_token_num = 2
@@ -402,7 +398,8 @@ if __name__ == '__main__':
                 tokenizer=tokenizer, 
                 max_length=args.max_seq_length, 
                 sample_strategy=args.sample_strategy, 
-                neg_top_k=args.neg_top_k
+                neg_top_k=args.neg_top_k, 
+                rand_seed=args.seed
             )
         labels = [train_dataset[s_idx]['label'] for s_idx in range(len(train_dataset))]
         logger.info(f"[Train] Coref: {labels.count(1)} non-Coref: {labels.count(0)}")

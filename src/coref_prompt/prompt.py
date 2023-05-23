@@ -8,9 +8,9 @@ import numpy as np
 PROMPT_TYPE = [
     'hn', 'hc', 'hq', # base prompts
     'sn', 'sc', 'sq', 
-    'm_ht_hn', 'm_ht_hc', 'm_ht_hq', 'm_hta_hn', 'm_hta_hc', 'm_hta_hq', # mix prompts
-    'm_st_hn', 'm_st_hc', 'm_st_hq', 'm_sta_hn', 'm_sta_hc', 'm_sta_hq', 
-    'ma_remove-prefix', 'ma_remove-anchor', 'ma_remove-match' # mix prompt ablation
+    'm_ht_hn', 'm_ht_hc', 'm_ht_hq', 'm_hta_hn', 'm_hta_hc', 'm_hta_hq', 'm_htao_hn', 'm_htao_hc', 'm_htao_hq', # mix prompts
+    'm_st_hn', 'm_st_hc', 'm_st_hq', 'm_sta_hn', 'm_sta_hc', 'm_sta_hq', 'm_stao_hn', 'm_stao_hc', 'm_stao_hq', 
+    'ma_remove-prefix', 'ma_remove-anchor', 'ma_remove-match' # mix prompt m_hta_hn ablations
 ]
 WORD_FILTER = set([
     'you', 'your', 'yours', 'yourself', 'yourselves', 
@@ -39,15 +39,14 @@ def create_event_context(
     ) -> dict:
     '''create segments contains events
     # Args
-    e_sent_idx:
+    [e1/e2_]e_sent_idx:
         host sentence index
-    e_sent_start: 
+    [e1/e2_]e_sent_start: 
         trigger offset in the host sentence
-    e_trigger:
-        trigger words of the event
+    [e1/e2_]e_trigger:
+        trigger of the event
     sentences: 
-        all the sentences of the document, 
-        format {"start": sentence offset in the document, "text": content}
+        all the sentences in the document, {"start": sentence offset in the document, "text": content}
     sentence_lens: 
         token numbers of all the sentences (not include [CLS], [SEP], etc.)
     s_tokens:
@@ -55,18 +54,18 @@ def create_event_context(
     tokenizer:
         tokenizer of the chosen PTM
     max_length:
-        max total token numbers of the two segments (not include [CLS], [SEP], etc.)
+        max total token numbers of segments (not include [CLS], [SEP], etc.)
     # Return
     type: 
         context type, 'same_sent' or 'diff_sent', two events in the same/different sentence
-    (e1/e2_)core_context: 
-        host sentence that contains the event
-    (e1/e2_)before_context: 
-        sentences before the host sentence
-    (e1/e2_)after_context: 
-        sentences after the host sentence
+    [e1/e2_]core_context: 
+        the host sentence contains the event
+    [e1/e2_]before_context: 
+        context before the host sentence
+    [e1/e2_]after_context: 
+        context after the host sentence
     e1s_core_offset, e1e_core_offset, e2s_core_offset, e2e_core_offset: 
-        offsets of event triggers in the host sentence
+        offsets of triggers in the host sentence
     '''
     if e1_sent_idx == e2_sent_idx: # two events in the same sentence
         assert e1_sent_start < e2_sent_start
@@ -91,7 +90,7 @@ def create_event_context(
             core_context_after = tokenizer.decode(tokenizer.encode(core_context_after)[1:-1][:before_after_length])
             core_context = core_context_before + core_context_middle + core_context_after
             e1s_offset, e1e_offset, e2s_offset, e2e_offset = np.asarray([e1s_offset, e1e_offset, e2s_offset, e2e_offset]) + np.full((4,), len(core_context_before))
-        else: # add other sentences
+        else: # create contexts before/after the host sentence
             e1s_offset, e1e_offset, e2s_offset, e2e_offset = np.asarray([e1s_offset, e1e_offset, e2s_offset, e2e_offset]) + np.full((4,), len(core_context_before))
             e_before, e_after = e1_sent_idx - 1, e1_sent_idx + 1
             while True:
@@ -276,7 +275,7 @@ def create_base_template(e1_trigger:str, e2_trigger:str, prompt_type:str, s_toke
         raise ValueError(f'Unknown prompt type: {prompt_type}')
     special_tokens = [
         s_tokens['e1s'], s_tokens['e1e'], s_tokens['e2s'], s_tokens['e2e']
-    ] if 'h' in prompt_type else [
+    ] if prompt_type.startswith('h') else [
         s_tokens['e1s'], s_tokens['e1e'], s_tokens['e2s'], s_tokens['e2e'], 
         s_tokens['l1'], s_tokens['l2'], s_tokens['l3'], s_tokens['l4'], s_tokens['l5'], s_tokens['l6']
     ]
@@ -289,11 +288,12 @@ def create_base_template(e1_trigger:str, e2_trigger:str, prompt_type:str, s_toke
     }
 
 def create_mix_template(
-    e1_trigger:str, e2_trigger:str, e1_arg_str: str, e2_arg_str: str, e1_related_str:str, e2_related_str:str, 
+    e1_trigger:str, e2_trigger:str, 
+    e1_arg_str: str, e2_arg_str: str, e1_related_str:str, e2_related_str:str, 
     prompt_type:str, s_tokens:dict
     ) -> dict:
     remove_prefix_temp, remove_anchor_temp, remove_match = False, False, False
-    if prompt_type.startswith('ma'): # mix ablation
+    if prompt_type.startswith('ma'): # m_hta_hn prompt ablation
         anchor_temp_type, inference_temp_type = 'hta', 'hn'
         ablation = prompt_type.split('_')[1]
         if ablation == 'remove-prefix':
@@ -304,13 +304,14 @@ def create_mix_template(
             remove_match = True
     else:
         _, anchor_temp_type, inference_temp_type = prompt_type.split('_')
-    
+    # prefix template
     prefix_trigger_offsets = []
     prefix_template = f"In the following text, the focus is on the events expressed by {s_tokens['e1s']} "
     prefix_trigger_offsets.append([len(prefix_template), len(prefix_template) + len(e1_trigger) - 1])
     prefix_template += f"{e1_trigger} {s_tokens['e1e']} and {s_tokens['e2s']} "
     prefix_trigger_offsets.append([len(prefix_template), len(prefix_template) + len(e2_trigger) - 1])
     prefix_template += f"{e2_trigger} {s_tokens['e2e']}, and it needs to judge whether they refer to the same or different events: "
+    # anchor template
     if anchor_temp_type.startswith('h'): # hard template
         e1_anchor_temp = "Here "
         e1s_anchor_offset = len(e1_anchor_temp)
@@ -322,60 +323,56 @@ def create_mix_template(
         e2_anchor_temp += f"{s_tokens['e2s']} {e2_trigger} "
         e2e_anchor_offset = len(e2_anchor_temp)
         e2_anchor_temp += f"{s_tokens['e2e']} expresses a {s_tokens['mask']} event"
-        if anchor_temp_type == 'hta': 
-            e1_anchor_temp += f"{' ' + e1_arg_str if e1_arg_str else ''}."
-            e2_anchor_temp += f"{' ' + e2_arg_str if e2_arg_str else ''}."
-        elif anchor_temp_type == 'ht': 
-            e1_anchor_temp += f"."
-            e2_anchor_temp += f"."
-        else:
-            raise ValueError(f'Unknown prompt type: {prompt_type}')
     elif anchor_temp_type.startswith('s'): # soft template
-        e1_anchor_temp = f"{s_tokens['l1']} {s_tokens['mask']} "
+        e1_anchor_temp = f"{s_tokens['l1']} {s_tokens['mask']} {s_tokens['l5']} "
         e1s_anchor_offset = len(e1_anchor_temp)
         e1_anchor_temp += f"{s_tokens['e1s']} {e1_trigger} "
         e1e_anchor_offset = len(e1_anchor_temp)
-        e1_anchor_temp += f"{s_tokens['e1e']}"
-        e2_anchor_temp = f"{s_tokens['l3']} {s_tokens['mask']} "
+        e1_anchor_temp += f"{s_tokens['e1e']} {s_tokens['l2']}"
+        e2_anchor_temp = f"{s_tokens['l3']} {s_tokens['mask']} {s_tokens['l6']} "
         e2s_anchor_offset = len(e2_anchor_temp)
         e2_anchor_temp += f"{s_tokens['e2s']} {e2_trigger} "
         e2e_anchor_offset = len(e2_anchor_temp)
-        e2_anchor_temp += f"{s_tokens['e2e']}"
-        if anchor_temp_type == 'sta': 
-            e1_anchor_temp += f"{' ' + e1_arg_str + ' ' if e1_arg_str else ' '}{s_tokens['l2']}."
-            e2_anchor_temp += f"{' ' + e2_arg_str + ' ' if e2_arg_str else ' '}{s_tokens['l4']}."
-        elif anchor_temp_type == 'st': 
-            e1_anchor_temp += f" {s_tokens['l2']}."
-            e2_anchor_temp += f" {s_tokens['l4']}."
-        else:
-            raise ValueError(f'Unknown prompt type: {prompt_type}')
+        e2_anchor_temp += f"{s_tokens['e2e']} {s_tokens['l4']}"
     else:
         raise ValueError(f'Unknown prompt type: {prompt_type}')
+    if anchor_temp_type.endswith('tao'): 
+        e1_anchor_temp += f"{' ' + e1_arg_str if e1_arg_str else ''}{' ' + e1_related_str if e1_related_str else ''}."
+        e2_anchor_temp += f"{' ' + e2_arg_str if e2_arg_str else ''}{' ' + e2_related_str if e2_related_str else ''}."
+    elif anchor_temp_type.endswith('ta'): 
+        e1_anchor_temp += f"{' ' + e1_arg_str if e1_arg_str else ''}."
+        e2_anchor_temp += f"{' ' + e2_arg_str if e2_arg_str else ''}."
+    elif anchor_temp_type.endswith('t'): 
+        e1_anchor_temp += f"."
+        e2_anchor_temp += f"."
+    else:
+        raise ValueError(f'Unknown prompt type: {prompt_type}')
+    # inference template
     infer_trigger_offsets = []
     infer_template = f"In conclusion, the events expressed by {s_tokens['e1s']} "
     infer_trigger_offsets.append([len(infer_template), len(infer_template) + len(e1_trigger) - 1])
     infer_template += f"{e1_trigger} {s_tokens['e1e']} and {s_tokens['e2s']} "
     infer_trigger_offsets.append([len(infer_template), len(infer_template) + len(e2_trigger) - 1])
     infer_template += f"{e2_trigger} {s_tokens['e2e']}"
-    if not remove_match:
-        infer_template += f" have {s_tokens['mask']} event type and {s_tokens['mask']} participants"
     if remove_match:
         infer_template += f" refer to {s_tokens['mask']} event."
-    elif inference_temp_type == 'hn': 
-        infer_template += f", so they refer to {s_tokens['mask']} event."
-    elif inference_temp_type == 'hc': 
-        infer_template += f". So the event expressed by {s_tokens['e1s']} "
-        infer_trigger_offsets.append([len(infer_template), len(infer_template) + len(e1_trigger) - 1])
-        infer_template += f"{e1_trigger} {s_tokens['e1e']} {s_tokens['mask']} the event expressed by {s_tokens['e2s']} "
-        infer_trigger_offsets.append([len(infer_template), len(infer_template) + len(e2_trigger) - 1])
-        infer_template += f"{e2_trigger} {s_tokens['e2e']}."
-    elif inference_temp_type == 'hq': 
-        infer_template += f". So do they refer to the same event? {s_tokens['mask']}."
     else:
-        raise ValueError(f'Unknown prompt type: {prompt_type}')
+        infer_template += f" have {s_tokens['mask']} event type and {s_tokens['mask']} participants"
+        if inference_temp_type == 'hn': 
+            infer_template += f", so they refer to {s_tokens['mask']} event."
+        elif inference_temp_type == 'hc': 
+            infer_template += f". So the event expressed by {s_tokens['e1s']} "
+            infer_trigger_offsets.append([len(infer_template), len(infer_template) + len(e1_trigger) - 1])
+            infer_template += f"{e1_trigger} {s_tokens['e1e']} {s_tokens['mask']} the event expressed by {s_tokens['e2s']} "
+            infer_trigger_offsets.append([len(infer_template), len(infer_template) + len(e2_trigger) - 1])
+            infer_template += f"{e2_trigger} {s_tokens['e2e']}."
+        elif inference_temp_type == 'hq': 
+            infer_template += f". So do they refer to the same event? {s_tokens['mask']}."
+        else:
+            raise ValueError(f'Unknown prompt type: {prompt_type}')
     special_tokens = [
         s_tokens['e1s'], s_tokens['e1e'], s_tokens['e2s'], s_tokens['e2e']
-    ] if 'h' in anchor_temp_type else [
+    ] if anchor_temp_type.startswith('h') else [
         s_tokens['e1s'], s_tokens['e1e'], s_tokens['e2s'], s_tokens['e2e'], 
         s_tokens['l1'], s_tokens['l2'], s_tokens['l3'], s_tokens['l4'], s_tokens['l5'], s_tokens['l6']
     ]
@@ -400,40 +397,41 @@ def create_mix_template(
     }
 
 def findall(p, s):
-    '''yields all the positions of
-    the pattern p in the string s.'''
+    '''yields all the positions of p in s.'''
     i = s.find(p)
     while i != -1:
         yield i
         i = s.find(p, i+1)
 
-def select_args(my_args, other_related_info, match_other_related_args=True):
-    if not my_args:
-        return []
-    other_has_part, other_has_place = False, False
-    if match_other_related_args:
-        other_args = other_related_info['arguments'] + list(
-            filter(lambda x: x['mention'].lower() not in WORD_FILTER, other_related_info['related_arguments'])
-        )
-    else:
-        other_args = other_related_info['arguments']
-    for arg in other_args:
-        if arg['role'] == 'participant':
-            other_has_part = True
-        elif arg['role'] == 'place':
-            other_has_place = True    
-    return [
-        arg for arg in my_args 
-        if (arg['role'] == 'participant' and other_has_part) or (arg['role'] == 'place' and other_has_place)
-    ]
-
 def create_arg_and_related_info_str(prompt_type:str, e1_related_info:dict, e2_related_info:dict, select_arg_strategy:str, s_tokens:dict):
+
+    assert select_arg_strategy in ['no_filter', 'filter_related_args', 'filter_all']
+
+    def select_args(my_args:list, other_related_info:dict, match_other_related_args:bool) -> list:
+        if not my_args:
+            return []
+        other_has_part, other_has_place = False, False
+        if match_other_related_args:
+            other_args = other_related_info['arguments'] + list(
+                filter(lambda x: x['mention'].lower() not in WORD_FILTER, other_related_info['related_arguments'])
+            )
+        else:
+            other_args = other_related_info['arguments']
+        for arg in other_args:
+            if arg['role'] == 'participant':
+                other_has_part = True
+            if arg['role'] == 'place':
+                other_has_place = True    
+        return [
+            arg for arg in my_args 
+            if (arg['role'] == 'participant' and other_has_part) or (arg['role'] == 'place' and other_has_place)
+        ]
 
     def convert_args_to_str(args:list, use_filter:bool, soft_prompt:bool):
         if use_filter:
             args = filter(lambda x: x['mention'].lower() not in WORD_FILTER, args)
         if soft_prompt:
-            return f"{s_tokens['l7']} {', '.join([arg['mention'] for arg in args])} {s_tokens['l8']}".strip(), [s_tokens['l7'], s_tokens['l8']]
+            return f"{s_tokens['l7']} {', '.join([arg['mention'] for arg in args])} {s_tokens['l8']}".strip() if args else "", [s_tokens['l7'], s_tokens['l8']]
         participants, places, unknows = (
             [arg for arg in args if arg['role'] == 'participant'], 
             [arg for arg in args if arg['role'] == 'place'], 
@@ -455,7 +453,7 @@ def create_arg_and_related_info_str(prompt_type:str, e1_related_info:dict, e2_re
             related_args = list(filter(lambda x: x['mention'].lower() not in WORD_FILTER, related_args))
         if soft_prompt:
             return (
-                f"{', '.join([arg['mention'] for arg in related_triggers])} {s_tokens['l9']}" if related_triggers else ""
+                f"{', '.join(set(related_triggers))} {s_tokens['l9']} " if related_triggers else ""
                 f"{', '.join([arg['mention'] for arg in related_args])} {s_tokens['l10']}" if related_args else ""
             ).strip(), [s_tokens['l9'], s_tokens['l10']]
         related_str = ''
@@ -467,10 +465,10 @@ def create_arg_and_related_info_str(prompt_type:str, e1_related_info:dict, e2_re
         return related_str.strip(), []
 
     special_tokens = []
-    e1_args = select_args(e1_related_info['arguments'], e2_related_info, 'o' in prompt_type) if select_arg_strategy == 'filter_all' else e1_related_info['arguments']
-    e2_args = select_args(e2_related_info['arguments'], e1_related_info, 'o' in prompt_type) if select_arg_strategy == 'filter_all' else e2_related_info['arguments']
-    e1_arg_str, arg_special_tokens = convert_args_to_str(e1_args, not prompt_type.startswith('m'), 's' in prompt_type)
-    e2_arg_str, _ = convert_args_to_str(e2_args, not prompt_type.startswith('m'), 's' in prompt_type)
+    e1_args = select_args(e1_related_info['arguments'], e2_related_info, 'tao' in prompt_type) if select_arg_strategy == 'filter_all' else e1_related_info['arguments']
+    e2_args = select_args(e2_related_info['arguments'], e1_related_info, 'tao' in prompt_type) if select_arg_strategy == 'filter_all' else e2_related_info['arguments']
+    e1_arg_str, arg_special_tokens = convert_args_to_str(e1_args, not prompt_type.startswith('m'), 'st' in prompt_type)
+    e2_arg_str, _ = convert_args_to_str(e2_args, not prompt_type.startswith('m'), 'st' in prompt_type)
     special_tokens += arg_special_tokens
     e1_related_triggers, e2_related_triggers = e1_related_info['related_triggers'], e2_related_info['related_triggers']
     if not e1_related_triggers or not e2_related_triggers:
@@ -479,8 +477,8 @@ def create_arg_and_related_info_str(prompt_type:str, e1_related_info:dict, e2_re
         if select_arg_strategy in ['filter_all', 'filter_related_args'] else e1_related_info['related_arguments']
     e2_related_args = select_args(e2_related_info['related_arguments'], e1_related_info, 'o' in prompt_type) \
         if select_arg_strategy in ['filter_all', 'filter_related_args'] else e2_related_info['related_arguments']
-    e1_related_str, related_special_tokens = convert_related_info_to_str(e1_related_triggers,e1_related_args, True, 's' in prompt_type)
-    e2_related_str, _ = convert_related_info_to_str(e2_related_triggers, e2_related_args, True, 's' in prompt_type)
+    e1_related_str, related_special_tokens = convert_related_info_to_str(e1_related_triggers,e1_related_args, True, 'st' in prompt_type)
+    e2_related_str, _ = convert_related_info_to_str(e2_related_triggers, e2_related_args, True, 'st' in prompt_type)
     special_tokens += related_special_tokens
     return e1_arg_str, e2_arg_str, e1_related_str, e2_related_str, list(set(special_tokens))
 
@@ -491,6 +489,44 @@ def create_prompt(
     prompt_type:str, select_arg_strategy:str, 
     model_type, tokenizer, max_length:int
     ) -> dict:
+    '''create event coreference prompts
+    [e1/e2]_sent_idx:
+        host sentence index
+    [e1/e2]_sent_start: 
+        trigger offset in the host sentence
+    [e1/e2]_trigger:
+        trigger of the event
+    [e1/e2]_related_info:
+        arguments & related event information dict
+    sentences: 
+        all the sentences in the document, {"start": sentence offset in the document, "text": content}
+    sentence_lens: 
+        token numbers of all the sentences (not include [CLS], [SEP], etc.)
+    prompt_type:
+        prompt type
+    select_arg_strategy:
+        argument select strategy
+    model_type:
+        PTM type
+    tokenizer:
+        tokenizer of the chosen PTM
+    max_length:
+        max total token numbers of prompt
+    # Return
+    {
+        'prompt': prompt, \n
+        'mask_offset': coreference mask offset in the prompt, \n
+        'type_match_mask_offset': event type match mask offset in the prompt, \n
+        'arg_match_mask_offset': argument match mask offset in the prompt, \n
+        'e1s_offset': [e1s] offset in the prompt, \n
+        'e1e_offset': [e1e] offset in the prompt, \n
+        'e1_type_mask_offset': e1 event type mask offset in the prompt, \n
+        'e2s_offset': [e2s] offset in the prompt, \n
+        'e2e_offset': [e2e] offset in the prompt, \n
+        'e2_type_mask_offset': e2 event type mask offset in the prompt, \n
+        'trigger_offsets': all the triggers' offsets in the prompt
+    }
+    '''
 
     special_token_dict = {
         'mask': '[MASK]', 'e1s': '[E1_START]', 'e1e': '[E1_END]', 'e2s': '[E2_START]', 'e2e': '[E2_END]', 
@@ -500,7 +536,7 @@ def create_prompt(
     } if model_type == 'bert' else {
         'mask': '<mask>', 'e1s': '<e1_start>', 'e1e': '<e1_end>', 'e2s': '<e2_start>', 'e2e': '<e2_end>', 
         'l1': '<l1>', 'l2': '<l2>', 'l3': '<l3>', 'l4': '<l4>', 'l5': '<l5>', 'l6': '<l6>', 
-        'l7': '<L7>', 'l8': '<L8>', 'l9': '<L9>', 'l10': '<L10>', 
+        'l7': '<l7>', 'l8': '<l8>', 'l9': '<l9>', 'l10': '<l10>', 
         'match': '<match>', 'mismatch': '<mismatch>', 'refer': '<refer_to>', 'no_refer': '<not_refer_to>'
     }
     for i in range(len(EVENT_SUBTYPES) + 1):
@@ -538,22 +574,20 @@ def create_prompt(
             e2s_offset, e2e_offset = (
                 np.asarray([e2s_offset, e2e_offset]) + 
                 np.full((2,), len(template_data['template']) + len(context_data['e1_before_context']) + 
-                    len(context_data['e1_core_context']) + len(context_data['e1_after_context']) + 
-                    len(context_data['e2_before_context']) + 1
+                    len(context_data['e1_core_context']) + len(context_data['e1_after_context']) + 1 + 
+                    len(context_data['e2_before_context'])
                 )
             )
         mask_offset = prompt.find(special_token_dict['mask'])
-        tri1s_offset, tri1e_offset = e1s_offset + len(special_token_dict['e1s']) + 1, e1e_offset - 2
-        tri2s_offset, tri2e_offset = e2s_offset + len(special_token_dict['e2s']) + 1, e2e_offset - 2
-        trigger_offsets.append([tri1s_offset, tri1e_offset])
-        trigger_offsets.append([tri2s_offset, tri2e_offset])
+        trigger_offsets.append([e1s_offset + len(special_token_dict['e1s']) + 1, e1e_offset - 2])
+        trigger_offsets.append([e2s_offset + len(special_token_dict['e2s']) + 1, e2e_offset - 2])
         assert prompt[mask_offset:mask_offset + len(special_token_dict['mask'])] == special_token_dict['mask']
         assert prompt[e1s_offset:e1e_offset] == special_token_dict['e1s'] + ' ' + e1_trigger + ' '
         assert prompt[e1e_offset:e1e_offset + len(special_token_dict['e1e'])] == special_token_dict['e1e']
         assert prompt[e2s_offset:e2e_offset] == special_token_dict['e2s'] + ' ' + e2_trigger + ' '
         assert prompt[e2e_offset:e2e_offset + len(special_token_dict['e2e'])] == special_token_dict['e2e']
         for s, e in trigger_offsets:
-            assert prompt[s:e+1] == e1_trigger or prompt[s:e+1] == e2_trigger
+            assert prompt[s:e+1] in [e1_trigger, e2_trigger]
         return {
             'prompt': prompt, 
             'mask_offset': mask_offset, 
@@ -660,16 +694,13 @@ def create_prompt(
                 e1_type_mask_offset, e2_type_mask_offset, mask_offset = mask_offsets
             else:
                 e1_type_mask_offset, e2_type_mask_offset, type_match_mask_offset, arg_match_mask_offset, mask_offset = mask_offsets
-            tri1s_context_offset, tri1e_context_offset = e1s_context_offset + len(special_token_dict['e1s']) + 1, e1e_context_offset - 2
-            tri2s_context_offset, tri2e_context_offset = e2s_context_offset + len(special_token_dict['e2s']) + 1, e2e_context_offset - 2
-            trigger_offsets.append([tri1s_context_offset, tri1e_context_offset])
-            trigger_offsets.append([tri2s_context_offset, tri2e_context_offset])
             assert prompt[e1_type_mask_offset:e1_type_mask_offset + len(special_token_dict['mask'])] == special_token_dict['mask']
             assert prompt[e2_type_mask_offset:e2_type_mask_offset + len(special_token_dict['mask'])] == special_token_dict['mask']
-        tri1s_offset, tri1e_offset = e1s_offset + len(special_token_dict['e1s']) + 1, e1e_offset - 2
-        tri2s_offset, tri2e_offset = e2s_offset + len(special_token_dict['e2s']) + 1, e2e_offset - 2
-        trigger_offsets.append([tri1s_offset, tri1e_offset])
-        trigger_offsets.append([tri2s_offset, tri2e_offset])
+        trigger_offsets.append([e1s_context_offset + len(special_token_dict['e1s']) + 1, e1e_context_offset - 2])
+        trigger_offsets.append([e2s_context_offset + len(special_token_dict['e2s']) + 1, e2e_context_offset - 2])
+        if not remove_anchor_temp:
+            trigger_offsets.append([e1s_offset + len(special_token_dict['e1s']) + 1, e1e_offset - 2])
+            trigger_offsets.append([e2s_offset + len(special_token_dict['e2s']) + 1, e2e_offset - 2])
         trigger_offsets += infer_trigger_offsets
         if not remove_match:
             assert prompt[type_match_mask_offset:type_match_mask_offset + len(special_token_dict['mask'])] == special_token_dict['mask']
@@ -697,6 +728,9 @@ def create_prompt(
 
 def create_verbalizer(tokenizer, model_type, prompt_type):
     base_verbalizer = {
+        'coref': {'token': 'same', 'id': tokenizer.convert_tokens_to_ids('same')}, 
+        'non-coref': {'token': 'different', 'id': tokenizer.convert_tokens_to_ids('different')}
+    } if prompt_type.startswith('ma') else {
         'coref': {
             'token': '[REFER_TO]' if model_type == 'bert' else '<refer_to>', 
             'id': tokenizer.convert_tokens_to_ids('[REFER_TO]' if model_type == 'bert' else '<refer_to>'), 
@@ -719,22 +753,24 @@ def create_verbalizer(tokenizer, model_type, prompt_type):
     if prompt_type.startswith('h') or prompt_type.startswith('s'): # base prompt
         return base_verbalizer
     else: # mix prompt
-        for subtype, s_id in subtype2id.items():
-            base_verbalizer[subtype] = {
-                'token': f'[ST_{s_id}]' if model_type == 'bert' else f'<st_{s_id}>', 
-                'id': tokenizer.convert_tokens_to_ids(f'[ST_{s_id}]' if model_type == 'bert' else f'<st_{s_id}>'), 
-                'description': subtype if subtype != 'other' else 'normal'
+        if prompt_type != 'ma_remove-anchor':
+            for subtype, s_id in subtype2id.items():
+                base_verbalizer[subtype] = {
+                    'token': f'[ST_{s_id}]' if model_type == 'bert' else f'<st_{s_id}>', 
+                    'id': tokenizer.convert_tokens_to_ids(f'[ST_{s_id}]' if model_type == 'bert' else f'<st_{s_id}>'), 
+                    'description': subtype if subtype != 'other' else 'normal'
+                }
+        if prompt_type != 'ma_remove-match':
+            base_verbalizer['match'] = {
+                'token': '[MATCH]' if model_type == 'bert' else '<match>', 
+                'id': tokenizer.convert_tokens_to_ids('[MATCH]' if model_type == 'bert' else '<match>'), 
+                'description': 'same related relevant similar matching matched'
             }
-        base_verbalizer['match'] = {
-            'token': '[MATCH]' if model_type == 'bert' else '<match>', 
-            'id': tokenizer.convert_tokens_to_ids('[MATCH]' if model_type == 'bert' else '<match>'), 
-            'description': 'same related relevant similar matching matched'
-        }
-        base_verbalizer['mismatch'] = {
-            'token': '[MISMATCH]' if model_type == 'bert' else '<mismatch>', 
-            'id': tokenizer.convert_tokens_to_ids('[MISMATCH]' if model_type == 'bert' else '<mismatch>'), 
-            'description': 'different unrelated irrelevant dissimilar mismatched'
-        }
+            base_verbalizer['mismatch'] = {
+                'token': '[MISMATCH]' if model_type == 'bert' else '<mismatch>', 
+                'id': tokenizer.convert_tokens_to_ids('[MISMATCH]' if model_type == 'bert' else '<mismatch>'), 
+                'description': 'different unrelated irrelevant dissimilar mismatched'
+            }
         return base_verbalizer
 
 def get_special_tokens(model_type:str, token_type:str):

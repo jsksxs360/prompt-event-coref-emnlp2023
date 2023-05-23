@@ -9,13 +9,13 @@ from prompt import create_prompt
 def get_pred_related_info(simi_file:str) -> dict:
     '''
     # Returns:
-        - related info dictionary: {doc_id: {event_offset: {
-            'arguments': [{"global_offset": 798, "mention": "We", "role": "participant"}]
-            'related_triggers': ['charged'], 
-            'related_arguments': [
-                {'global_offset': 1408, 'mention': 'Garvina', 'role': 'participant'}, 
-                {'global_offset': 1368, 'mention': 'Prosecutors', 'role': 'participant'}
-            ]
+        {doc_id: {event_offset: {\n
+            'arguments': [{"global_offset": 798, "mention": "We", "role": "participant"}]\n
+            'related_triggers': ['charged'], \n
+            'related_arguments': [\n
+                {'global_offset': 1408, 'mention': 'Garvina', 'role': 'participant'}, \n
+                {'global_offset': 1368, 'mention': 'Prosecutors', 'role': 'participant'}\n
+            ]\n
         }}}
     '''
     related_info_dict = {}
@@ -39,8 +39,30 @@ def get_event_cluster_id(event_id:str, clusters:list) -> str:
     raise ValueError(f'Unknown event_id: {event_id}')
 
 class KBPCoref(Dataset):
-    def __init__(self, data_file:str, simi_file:str, prompt_type:str, select_arg_strategy:str, model_type:str, tokenizer, max_length:int):
-        assert prompt_type in PROMPT_TYPE and select_arg_strategy in SELECT_ARG_STRATEGY and model_type in ['bert', 'roberta', 'deberta', 'longformer']
+    '''KBP Event Coreference Dataset
+    # Args
+    data_file:
+        kbp event data file
+    simi_file:
+        related info file, contains similar triggers and extracted arguments
+    prompt_type:
+        prompt type
+    select_arg_strategy:
+        event argument selection strategy
+    model_type:
+        PTM type
+    tokenizer:
+        tokenizer of the chosen PTM
+    max_length:
+        maximun token number of each sample
+    '''
+
+    def __init__(self, 
+        data_file:str, simi_file:str, 
+        prompt_type:str, select_arg_strategy:str, 
+        model_type:str, tokenizer, max_length:int
+        ):
+        assert prompt_type in PROMPT_TYPE and select_arg_strategy in SELECT_ARG_STRATEGY and model_type in ['bert', 'roberta']
         self.model_type = model_type
         self.tokenizer = tokenizer
         self.max_length = max_length
@@ -102,7 +124,20 @@ class KBPCoref(Dataset):
     def __getitem__(self, idx):
         return self.data[idx]
 
-def create_event_simi_dict(event_pairs_id, event_pairs_cos, clusters):
+def create_event_simi_dict(event_pairs_id:list, event_pairs_cos:list, clusters:list) -> dict:
+    '''create similar event list for each event
+    # Args
+    event_pairs_id:
+        event-pair id, format: 'e1_id###e2_id'
+    event_pairs_cos:
+        similarities of event pairs
+    clusters:
+        event clusters in the document
+    # Return
+    {
+        event id: [{'id': event id, 'cos': event similarity, 'coref': coreference}, ...]
+    }
+    '''
     simi_dict = defaultdict(list)
     for id_pair, cos in zip(event_pairs_id, event_pairs_cos):
         e1_id, e2_id = id_pair.split('###')
@@ -113,7 +148,16 @@ def create_event_simi_dict(event_pairs_id, event_pairs_cos, clusters):
         simi_list.sort(key=lambda x:x['cos'], reverse=True)
     return simi_dict
 
-def get_noncoref_ids(simi_list, top_k):
+def get_noncoref_ids(simi_list:list, top_k:int) -> list:
+    '''get non-coreference event list
+    # Args
+    simi_list:
+        similar event list, format: [{'id': event id, 'cos': event similarity, 'coref': coreference}, ...]
+    top_k:
+        maximum return event number
+    # Return
+    non-coreference event id list
+    '''
     noncoref_ids = []
     for simi in simi_list:
         if simi['coref'] == 0:
@@ -122,21 +166,48 @@ def get_noncoref_ids(simi_list, top_k):
                 break
     return noncoref_ids
 
-should_remove = lambda simi_list, top_k: len(set([simi['coref'] for simi in simi_list[:top_k]])) == 1
-
 class KBPCorefTiny(Dataset):
-    def __init__(self, data_file:str, data_file_with_cos:str, simi_file:str, 
-        prompt_type:str, select_arg_strategy:str, model_type:str, tokenizer, max_length:int, 
-        sample_strategy:str, neg_top_k:int, rand_seed:int=42
+    '''KBP Event Coreference Dataset
+    # Args
+    data_file:
+        kbp event data file
+    data_file_with_cos:
+        kbp event data file with event similarities
+    simi_file:
+        related info file, contains similar triggers and extracted arguments
+    prompt_type:
+        prompt type
+    select_arg_strategy:
+        event argument selection strategy
+    model_type:
+        PTM type
+    tokenizer:
+        tokenizer of the chosen PTM
+    max_length:
+        maximun token number of each sample
+    sample_strategy:
+        undersampling strategy to reduce negative samples, ['random', 'corefnm', 'corefenn']
+        random: random undersampling to make the ratio of postive and negative sample 1:1 
+        corefnm: CorefNearMiss, select representative (different to judge coreference) negative samples 
+        corefenn: CorefEditedNearestNeighbours, clean out simple samples (similar events have same coreference as this sample)
+    neg_top_k:
+        negative sample top_k value
+    rand_seed:
+        random seed
+    '''
+
+    def __init__(self, 
+        data_file:str, data_file_with_cos:str, simi_file:str, 
+        prompt_type:str, select_arg_strategy:str, 
+        model_type:str, tokenizer, max_length:int, 
+        sample_strategy:str, neg_top_k:int, rand_seed:int
         ):
-        '''
-        - data_file: source train data file
-        - data_file_with_cos: train data file with event similarities
-        '''
-        assert prompt_type in PROMPT_TYPE and select_arg_strategy in SELECT_ARG_STRATEGY and model_type in ['bert', 'roberta', 'deberta', 'longformer']
+        assert prompt_type in PROMPT_TYPE and select_arg_strategy in SELECT_ARG_STRATEGY and model_type in ['bert', 'roberta']
         assert sample_strategy in ['random', 'corefnm', 'corefenn']
         assert neg_top_k > 0
         np.random.seed(rand_seed)
+        self.is_easy_to_judge = lambda simi_list, top_k: len(set([simi['coref'] for simi in simi_list[:top_k]])) == 1
+
         self.model_type = model_type
         self.tokenizer = tokenizer
         self.max_length = max_length
@@ -193,7 +264,7 @@ class KBPCorefTiny(Dataset):
                                 'label': 1
                             })
             # negtive samples (non-coref pairs)
-            if self.sample_strategy == 'random':
+            if self.sample_strategy == 'random': # random undersampling
                 doc_sent_dict, doc_sent_len_dict = {}, {}
                 all_nocoref_event_pairs = []
                 f.seek(0)
@@ -248,7 +319,7 @@ class KBPCorefTiny(Dataset):
                         'e2_type_mask_offset': prompt_data['e2_type_mask_offset'], 
                         'label': 0
                     })
-            elif self.sample_strategy == 'corefnm':
+            elif self.sample_strategy == 'corefnm': # CorefNearMiss
                 for line in tqdm(f_cos.readlines()):
                     sample = json.loads(line.strip())
                     clusters = sample['clusters']
@@ -258,8 +329,7 @@ class KBPCorefTiny(Dataset):
                     events_list, events_dict = sample['events'], {e['event_id']:e for e in sample['events']}
                     for i in range(len(events_list)):
                         event_1 = events_list[i]
-                        noncoref_event_ids = get_noncoref_ids(event_simi_dict[event_1['event_id']], top_k=neg_top_k)
-                        for e_id in noncoref_event_ids: # non-coref
+                        for e_id in get_noncoref_ids(event_simi_dict[event_1['event_id']], top_k=neg_top_k): # non-coref
                             event_2 = events_dict[e_id]
                             if event_1['start'] < event_2['start']:
                                 event_1_related_info = self.related_dict[sample['doc_id']][event_1['start']]
@@ -294,7 +364,7 @@ class KBPCorefTiny(Dataset):
                                     'e2_type_mask_offset': prompt_data['e2_type_mask_offset'], 
                                     'label': 0
                                 })
-            elif self.sample_strategy == 'corefenn':
+            elif self.sample_strategy == 'corefenn': # Coref Edited Nearest Neighbours
                 for line in tqdm(f_cos.readlines()):
                     sample = json.loads(line.strip())
                     clusters = sample['clusters']
@@ -305,9 +375,9 @@ class KBPCorefTiny(Dataset):
                     for i in range(len(events) - 1):
                         for j in range(i + 1, len(events)):
                             event_1, event_2 = events[i], events[j]
-                            if (
-                                should_remove(event_simi_dict[event_1['event_id']], top_k=neg_top_k) or 
-                                should_remove(event_simi_dict[event_2['event_id']], top_k=neg_top_k)
+                            if ( # e1 or e2 is easy to judge coreference
+                                self.is_easy_to_judge(event_simi_dict[event_1['event_id']], top_k=neg_top_k) or 
+                                self.is_easy_to_judge(event_simi_dict[event_2['event_id']], top_k=neg_top_k)
                             ):
                                 continue
                             event_1_cluster_id = get_event_cluster_id(event_1['event_id'], clusters)
@@ -355,13 +425,12 @@ class KBPCorefTiny(Dataset):
     def __getitem__(self, idx):
         return self.data[idx]
 
-def get_dataLoader(args, dataset, tokenizer, prompt_type:str, verbalizer:dict, with_mask:bool=None, batch_size:int=None, shuffle:bool=False):
+def get_dataLoader(args, dataset:Dataset, tokenizer, prompt_type:str, verbalizer:dict, with_mask:bool=None, batch_size:int=None, shuffle:bool=False):
     assert prompt_type in PROMPT_TYPE
     pos_id, neg_id = verbalizer['coref']['id'], verbalizer['non-coref']['id']
     if prompt_type.startswith('m'):
-        match_id, mismatch_id = verbalizer['match']['id'], verbalizer['mismatch']['id']
-    if prompt_type.startswith('m') or prompt_type.startswith('t'):
-        event_type_ids = {
+        match_id, mismatch_id = (-1, -1) if prompt_type == 'ma_remove-match' else (verbalizer['match']['id'], verbalizer['mismatch']['id'])
+        event_type_ids = {} if prompt_type == 'ma_remove-anchor' else {
             s_id: verbalizer[subtype]['id']
             for s_id, subtype in id2subtype.items()
         }
@@ -877,8 +946,8 @@ if __name__ == '__main__':
     args = parser.parse_args()
     args.batch_size = 4
     args.max_seq_length = 512
-    args.model_type = 'longformer'
-    args.model_checkpoint = '../../PT_MODELS/allenai/longformer-large-4096'
+    args.model_type = 'roberta'
+    args.model_checkpoint = '../../PT_MODELS/roberta-large/'
     args.prompt_type = 'm_hta_hn'
     args.select_arg_strategy = 'no_filter'
     args.with_mask = False
@@ -917,7 +986,7 @@ if __name__ == '__main__':
         '../../data/KnowledgeExtraction/simi_files/simi_omni_train_related_info_0.75.json', 
         prompt_type=args.prompt_type, select_arg_strategy=args.select_arg_strategy, 
         model_type=args.model_type, tokenizer=tokenizer, max_length=args.max_seq_length, 
-        sample_strategy='corefnm', neg_top_k=3
+        sample_strategy='corefnm', neg_top_k=3, rand_seed=42
     )
     print_data_statistic('../../data/train_filtered_with_cos.json')
     print(len(train_small_data))

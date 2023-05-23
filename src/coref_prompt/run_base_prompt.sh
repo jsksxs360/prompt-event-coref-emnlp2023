@@ -1,4 +1,4 @@
-export OUTPUT_DIR=./longformer_hn_512_product_cosine_results/
+export OUTPUT_DIR=./roberta_hn_512_product_cosine_results/
 
 python3 run_base_prompt.py \
     --output_dir=$OUTPUT_DIR \
@@ -8,8 +8,8 @@ python3 run_base_prompt.py \
     --cosine_space_dim=64 \
     --cosine_slices=128 \
     --cosine_factor=4 \
-    --model_type=longformer \
-    --model_checkpoint=../../PT_MODELS/allenai/longformer-large-4096/ \
+    --model_type=roberta \
+    --model_checkpoint=../../PT_MODELS/roberta-large/ \
     --train_file=../../data/train_filtered.json \
     --train_file_with_cos=../../data/train_filtered_with_cos.json \
     --dev_file=../../data/dev_filtered.json \
