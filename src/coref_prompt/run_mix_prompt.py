@@ -399,6 +399,7 @@ if __name__ == '__main__':
                 max_length=args.max_seq_length, 
                 sample_strategy=args.sample_strategy, 
                 neg_top_k=args.neg_top_k, 
+                neg_threshold=args.neg_threshold, 
                 rand_seed=args.seed
             )
         labels = [train_dataset[s_idx]['label'] for s_idx in range(len(train_dataset))]

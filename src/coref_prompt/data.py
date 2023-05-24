@@ -166,6 +166,12 @@ def get_noncoref_ids(simi_list:list, top_k:int) -> list:
                 break
     return noncoref_ids
 
+def get_event_pair_similarity(simi_dict:dict, e1_id:str, e2_id:str) -> float:
+    for item in simi_dict[e1_id]:
+        if item['id'] == e2_id:
+            return item['cos']
+    raise ValueError(f"Can't find event pair: {e1_id} & {e2_id}")
+
 class KBPCorefTiny(Dataset):
     '''KBP Event Coreference Dataset
     # Args
@@ -186,12 +192,16 @@ class KBPCorefTiny(Dataset):
     max_length:
         maximun token number of each sample
     sample_strategy:
-        undersampling strategy to reduce negative samples, ['random', 'corefnm', 'corefenn']
+        undersampling strategy to reduce negative samples, ['random', 'corefnm', 'corefenn-1', 'corefenn-2']
         random: random undersampling to make the ratio of postive and negative sample 1:1 
         corefnm: CorefNearMiss, select representative (different to judge coreference) negative samples 
-        corefenn: CorefEditedNearestNeighbours, clean out simple samples (similar events have same coreference as this sample)
+        corefenn: CorefEditedNearestNeighbours, clean up samples that are easy to judge coreference
+            corefenn-1: clean out events that are coreferent (or non-coreferent) to all top k related events
+            corefenn-2: clean out the negative samples whose event-relatedness is relatively low
     neg_top_k:
         negative sample top_k value
+    neg_threshold:
+        negative sample event similarity filter threshold
     rand_seed:
         random seed
     '''
@@ -200,10 +210,10 @@ class KBPCorefTiny(Dataset):
         data_file:str, data_file_with_cos:str, simi_file:str, 
         prompt_type:str, select_arg_strategy:str, 
         model_type:str, tokenizer, max_length:int, 
-        sample_strategy:str, neg_top_k:int, rand_seed:int
+        sample_strategy:str, neg_top_k:int, neg_threshold:float, rand_seed:int
         ):
         assert prompt_type in PROMPT_TYPE and select_arg_strategy in SELECT_ARG_STRATEGY and model_type in ['bert', 'roberta']
-        assert sample_strategy in ['random', 'corefnm', 'corefenn']
+        assert sample_strategy in ['random', 'corefnm', 'corefenn-1', 'corefenn-2']
         assert neg_top_k > 0
         np.random.seed(rand_seed)
         self.is_easy_to_judge = lambda simi_list, top_k: len(set([simi['coref'] for simi in simi_list[:top_k]])) == 1
@@ -213,9 +223,9 @@ class KBPCorefTiny(Dataset):
         self.max_length = max_length
         self.sample_strategy = sample_strategy
         self.related_dict = get_pred_related_info(simi_file)
-        self.data = self.load_data(data_file, data_file_with_cos, neg_top_k, prompt_type, select_arg_strategy)
+        self.data = self.load_data(data_file, data_file_with_cos, neg_top_k, neg_threshold, prompt_type, select_arg_strategy)
     
-    def load_data(self, data_file, data_file_with_cos, neg_top_k, prompt_type:str, select_arg_strategy:str):
+    def load_data(self, data_file, data_file_with_cos, neg_top_k, neg_threshold, prompt_type:str, select_arg_strategy:str):
         Data = []
         with open(data_file, 'rt', encoding='utf-8') as f, open(data_file_with_cos, 'rt', encoding='utf-8') as f_cos: 
             # positive samples (coref pairs)
@@ -364,7 +374,7 @@ class KBPCorefTiny(Dataset):
                                     'e2_type_mask_offset': prompt_data['e2_type_mask_offset'], 
                                     'label': 0
                                 })
-            elif self.sample_strategy == 'corefenn': # Coref Edited Nearest Neighbours
+            elif self.sample_strategy.startswith('corefenn'): # Coref Edited Nearest Neighbours
                 for line in tqdm(f_cos.readlines()):
                     sample = json.loads(line.strip())
                     clusters = sample['clusters']
@@ -375,11 +385,15 @@ class KBPCorefTiny(Dataset):
                     for i in range(len(events) - 1):
                         for j in range(i + 1, len(events)):
                             event_1, event_2 = events[i], events[j]
-                            if ( # e1 or e2 is easy to judge coreference
-                                self.is_easy_to_judge(event_simi_dict[event_1['event_id']], top_k=neg_top_k) or 
-                                self.is_easy_to_judge(event_simi_dict[event_2['event_id']], top_k=neg_top_k)
-                            ):
-                                continue
+                            if self.sample_strategy == 'corefenn-1':
+                                if ( # e1 or e2 is easy to judge coreference
+                                    self.is_easy_to_judge(event_simi_dict[event_1['event_id']], top_k=neg_top_k) or 
+                                    self.is_easy_to_judge(event_simi_dict[event_2['event_id']], top_k=neg_top_k)
+                                ):
+                                    continue
+                            elif self.sample_strategy == 'corefenn-2':
+                                if get_event_pair_similarity(event_simi_dict, event_1['event_id'], event_2['event_id']) <= neg_threshold:
+                                    continue
                             event_1_cluster_id = get_event_cluster_id(event_1['event_id'], clusters)
                             event_2_cluster_id = get_event_cluster_id(event_2['event_id'], clusters)
                             event_1_related_info = self.related_dict[sample['doc_id']][event_1['start']]
@@ -986,7 +1000,7 @@ if __name__ == '__main__':
         '../../data/KnowledgeExtraction/simi_files/simi_omni_train_related_info_0.75.json', 
         prompt_type=args.prompt_type, select_arg_strategy=args.select_arg_strategy, 
         model_type=args.model_type, tokenizer=tokenizer, max_length=args.max_seq_length, 
-        sample_strategy='corefnm', neg_top_k=3, rand_seed=42
+        sample_strategy='corefnm', neg_top_k=3, neg_threshold=0.25, rand_seed=42
     )
     print_data_statistic('../../data/train_filtered_with_cos.json')
     print(len(train_small_data))
