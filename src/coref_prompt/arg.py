@@ -17,7 +17,7 @@ def parse_args():
     parser.add_argument("--pred_test_simi_file", default=None, type=str, required=True, help="The input related info file.")
     # whether to use sampling to refine the dataset
     parser.add_argument("--sample_strategy", default="corefnm", type=str, required=True, 
-        help="The chosen sampling strategy.", choices=['no', 'random', 'corefnm', 'corefenn-1', 'corefenn-2']
+        help="The chosen sampling strategy.", choices=['no', 'random', 'corefnm', 'corefenn1', 'corefenn2']
     )
     parser.add_argument("--neg_top_k", default="3", type=int)
     parser.add_argument("--neg_threshold", default="0.2", type=float)

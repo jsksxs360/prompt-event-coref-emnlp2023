@@ -38,6 +38,12 @@ def get_event_cluster_id(event_id:str, clusters:list) -> str:
             return cluster['hopper_id']
     raise ValueError(f'Unknown event_id: {event_id}')
 
+def get_event_cluster_size(event_id:str, clusters:list) -> int:
+    for cluster in clusters:
+        if event_id in cluster['events']:
+            return len(cluster['events'])
+    raise ValueError(f'Unknown event_id: {event_id}')
+
 class KBPCoref(Dataset):
     '''KBP Event Coreference Dataset
     # Args
@@ -104,6 +110,7 @@ class KBPCoref(Dataset):
                             'e1_trigger': event_1['trigger'], 
                             'e1_subtype': event_1['subtype'] if event_1['subtype'] in EVENT_SUBTYPES else 'normal', 
                             'e1_subtype_id': subtype2id.get(event_1['subtype'], 0), # 0 - 'other'
+                            'e1_coref_link_len': get_event_cluster_size(event_1['event_id'], clusters), 
                             'e1s_offset': prompt_data['e1s_offset'], 
                             'e1e_offset': prompt_data['e1e_offset'], 
                             'e1_type_mask_offset': prompt_data['e1_type_mask_offset'], 
@@ -111,6 +118,7 @@ class KBPCoref(Dataset):
                             'e2_trigger': event_2['trigger'], 
                             'e2_subtype': event_2['subtype'] if event_2['subtype'] in EVENT_SUBTYPES else 'normal', 
                             'e2_subtype_id': subtype2id.get(event_2['subtype'], 0), # 0 - 'other'
+                            'e2_coref_link_len': get_event_cluster_size(event_2['event_id'], clusters), 
                             'e2s_offset': prompt_data['e2s_offset'], 
                             'e2e_offset': prompt_data['e2e_offset'], 
                             'e2_type_mask_offset': prompt_data['e2_type_mask_offset'], 
@@ -192,12 +200,12 @@ class KBPCorefTiny(Dataset):
     max_length:
         maximun token number of each sample
     sample_strategy:
-        undersampling strategy to reduce negative samples, ['random', 'corefnm', 'corefenn-1', 'corefenn-2']
+        undersampling strategy to reduce negative samples, ['random', 'corefnm', 'corefenn1', 'corefenn2']
         random: random undersampling to make the ratio of postive and negative sample 1:1 
         corefnm: CorefNearMiss, select representative (different to judge coreference) negative samples 
         corefenn: CorefEditedNearestNeighbours, clean up samples that are easy to judge coreference
-            corefenn-1: clean out events that are coreferent (or non-coreferent) to all top k related events
-            corefenn-2: clean out the negative samples whose event-relatedness is relatively low
+            corefenn1: clean out events that are coreferent (or non-coreferent) to all top k related events
+            corefenn2: clean out the negative samples whose event-relatedness is relatively low
     neg_top_k:
         negative sample top_k value
     neg_threshold:
@@ -213,7 +221,7 @@ class KBPCorefTiny(Dataset):
         sample_strategy:str, neg_top_k:int, neg_threshold:float, rand_seed:int
         ):
         assert prompt_type in PROMPT_TYPE and select_arg_strategy in SELECT_ARG_STRATEGY and model_type in ['bert', 'roberta']
-        assert sample_strategy in ['random', 'corefnm', 'corefenn-1', 'corefenn-2']
+        assert sample_strategy in ['random', 'corefnm', 'corefenn1', 'corefenn2']
         assert neg_top_k > 0
         np.random.seed(rand_seed)
         self.is_easy_to_judge = lambda simi_list, top_k: len(set([simi['coref'] for simi in simi_list[:top_k]])) == 1
@@ -261,6 +269,7 @@ class KBPCorefTiny(Dataset):
                                 'e1_trigger': event_1['trigger'], 
                                 'e1_subtype': event_1['subtype'] if event_1['subtype'] in EVENT_SUBTYPES else 'normal', 
                                 'e1_subtype_id': subtype2id.get(event_1['subtype'], 0), # 0 - 'other'
+                                'e1_coref_link_len': get_event_cluster_size(event_1['event_id'], clusters), 
                                 'e1s_offset': prompt_data['e1s_offset'], 
                                 'e1e_offset': prompt_data['e1e_offset'], 
                                 'e1_type_mask_offset': prompt_data['e1_type_mask_offset'], 
@@ -268,6 +277,7 @@ class KBPCorefTiny(Dataset):
                                 'e2_trigger': event_2['trigger'], 
                                 'e2_subtype': event_2['subtype'] if event_2['subtype'] in EVENT_SUBTYPES else 'normal', 
                                 'e2_subtype_id': subtype2id.get(event_2['subtype'], 0), # 0 - 'other'
+                                'e2_coref_link_len': get_event_cluster_size(event_2['event_id'], clusters), 
                                 'e2s_offset': prompt_data['e2s_offset'], 
                                 'e2e_offset': prompt_data['e2e_offset'], 
                                 'e2_type_mask_offset': prompt_data['e2_type_mask_offset'], 
@@ -291,14 +301,19 @@ class KBPCorefTiny(Dataset):
                             event_1, event_2 = events[i], events[j]
                             event_1_cluster_id = get_event_cluster_id(event_1['event_id'], clusters)
                             event_2_cluster_id = get_event_cluster_id(event_2['event_id'], clusters)
+                            event_1_cluster_size = get_event_cluster_size(event_1['event_id'], clusters)
+                            event_2_cluster_size = get_event_cluster_size(event_2['event_id'], clusters)
                             event_1_related_info = self.related_dict[sample['doc_id']][event_1['start']]
                             event_2_related_info = self.related_dict[sample['doc_id']][event_2['start']]
                             if event_1_cluster_id != event_2_cluster_id:
                                 all_nocoref_event_pairs.append((
-                                    sample['doc_id'], event_1, event_2, event_1_related_info, event_2_related_info
+                                    sample['doc_id'], event_1, event_2, event_1_related_info, event_2_related_info, 
+                                    event_1_cluster_size, event_2_cluster_size
                                 ))
                 for choose_idx in np.random.choice(np.random.permutation(len(all_nocoref_event_pairs)), len(Data), replace=False):
-                    doc_id, event_1, event_2, event_1_related_info, event_2_related_info = all_nocoref_event_pairs[choose_idx]
+                    (
+                        doc_id, event_1, event_2, event_1_related_info, event_2_related_info, e1_cluster_size, e2_clister_size
+                    ) = all_nocoref_event_pairs[choose_idx]
                     prompt_data = create_prompt(
                         event_1['sent_idx'], event_1['sent_start'], event_1['trigger'], event_1_related_info, 
                         event_2['sent_idx'], event_2['sent_start'], event_2['trigger'], event_2_related_info, 
@@ -317,6 +332,7 @@ class KBPCorefTiny(Dataset):
                         'e1_trigger': event_1['trigger'], 
                         'e1_subtype': event_1['subtype'] if event_1['subtype'] in EVENT_SUBTYPES else 'normal', 
                         'e1_subtype_id': subtype2id.get(event_1['subtype'], 0), # 0 - 'other'
+                        'e1_coref_link_len': e1_cluster_size, 
                         'e1s_offset': prompt_data['e1s_offset'], 
                         'e1e_offset': prompt_data['e1e_offset'], 
                         'e1_type_mask_offset': prompt_data['e1_type_mask_offset'], 
@@ -324,6 +340,7 @@ class KBPCorefTiny(Dataset):
                         'e2_trigger': event_2['trigger'], 
                         'e2_subtype': event_2['subtype'] if event_2['subtype'] in EVENT_SUBTYPES else 'normal', 
                         'e2_subtype_id': subtype2id.get(event_2['subtype'], 0), # 0 - 'other'
+                        'e2_coref_link_len': e2_clister_size, 
                         'e2s_offset': prompt_data['e2s_offset'], 
                         'e2e_offset': prompt_data['e2e_offset'], 
                         'e2_type_mask_offset': prompt_data['e2_type_mask_offset'], 
@@ -362,6 +379,7 @@ class KBPCorefTiny(Dataset):
                                     'e1_trigger': event_1['trigger'], 
                                     'e1_subtype': event_1['subtype'] if event_1['subtype'] in EVENT_SUBTYPES else 'normal', 
                                     'e1_subtype_id': subtype2id.get(event_1['subtype'], 0), # 0 - 'other'
+                                    'e1_coref_link_len': get_event_cluster_size(event_1['event_id'], clusters), 
                                     'e1s_offset': prompt_data['e1s_offset'], 
                                     'e1e_offset': prompt_data['e1e_offset'], 
                                     'e1_type_mask_offset': prompt_data['e1_type_mask_offset'], 
@@ -369,6 +387,7 @@ class KBPCorefTiny(Dataset):
                                     'e2_trigger': event_2['trigger'], 
                                     'e2_subtype': event_2['subtype'] if event_2['subtype'] in EVENT_SUBTYPES else 'normal', 
                                     'e2_subtype_id': subtype2id.get(event_2['subtype'], 0), # 0 - 'other'
+                                    'e2_coref_link_len': get_event_cluster_size(event_2['event_id'], clusters), 
                                     'e2s_offset': prompt_data['e2s_offset'], 
                                     'e2e_offset': prompt_data['e2e_offset'], 
                                     'e2_type_mask_offset': prompt_data['e2_type_mask_offset'], 
@@ -385,13 +404,13 @@ class KBPCorefTiny(Dataset):
                     for i in range(len(events) - 1):
                         for j in range(i + 1, len(events)):
                             event_1, event_2 = events[i], events[j]
-                            if self.sample_strategy == 'corefenn-1':
+                            if self.sample_strategy == 'corefenn1':
                                 if ( # e1 or e2 is easy to judge coreference
                                     self.is_easy_to_judge(event_simi_dict[event_1['event_id']], top_k=neg_top_k) or 
                                     self.is_easy_to_judge(event_simi_dict[event_2['event_id']], top_k=neg_top_k)
                                 ):
                                     continue
-                            elif self.sample_strategy == 'corefenn-2':
+                            elif self.sample_strategy == 'corefenn2':
                                 if get_event_pair_similarity(event_simi_dict, event_1['event_id'], event_2['event_id']) <= neg_threshold:
                                     continue
                             event_1_cluster_id = get_event_cluster_id(event_1['event_id'], clusters)
@@ -417,6 +436,7 @@ class KBPCorefTiny(Dataset):
                                     'e1_trigger': event_1['trigger'], 
                                     'e1_subtype': event_1['subtype'] if event_1['subtype'] in EVENT_SUBTYPES else 'normal', 
                                     'e1_subtype_id': subtype2id.get(event_1['subtype'], 0), # 0 - 'other'
+                                    'e1_coref_link_len': get_event_cluster_size(event_1['event_id'], clusters), 
                                     'e1s_offset': prompt_data['e1s_offset'], 
                                     'e1e_offset': prompt_data['e1e_offset'], 
                                     'e1_type_mask_offset': prompt_data['e1_type_mask_offset'], 
@@ -424,6 +444,7 @@ class KBPCorefTiny(Dataset):
                                     'e2_trigger': event_2['trigger'], 
                                     'e2_subtype': event_2['subtype'] if event_2['subtype'] in EVENT_SUBTYPES else 'normal', 
                                     'e2_subtype_id': subtype2id.get(event_2['subtype'], 0), # 0 - 'other'
+                                    'e2_coref_link_len': get_event_cluster_size(event_2['event_id'], clusters), 
                                     'e2s_offset': prompt_data['e2s_offset'], 
                                     'e2e_offset': prompt_data['e2e_offset'], 
                                     'e2_type_mask_offset': prompt_data['e2_type_mask_offset'], 
@@ -1000,12 +1021,29 @@ if __name__ == '__main__':
         '../../data/KnowledgeExtraction/simi_files/simi_omni_train_related_info_0.75.json', 
         prompt_type=args.prompt_type, select_arg_strategy=args.select_arg_strategy, 
         model_type=args.model_type, tokenizer=tokenizer, max_length=args.max_seq_length, 
-        sample_strategy='corefnm', neg_top_k=3, neg_threshold=0.25, rand_seed=42
+        sample_strategy='random', neg_top_k=3, neg_threshold=0.2, rand_seed=42
     )
     print_data_statistic('../../data/train_filtered_with_cos.json')
     print(len(train_small_data))
     labels = [train_small_data[s_idx]['label'] for s_idx in range(len(train_small_data))]
     print('Coref:', labels.count(1), 'non-Coref:', labels.count(0))
+    singleton, short_link, long_link = 0, 0, 0
+    for s_idx in range(len(train_small_data)):
+        sample = train_small_data[s_idx]
+        if sample['label'] == 1:
+            continue
+        if sample['e1_coref_link_len'] == 1 or sample['e2_coref_link_len'] == 1:
+            singleton += 1
+        elif sample['e1_coref_link_len'] >= 10 or sample['e2_coref_link_len'] >= 10:
+            long_link += 1
+        else:
+            short_link += 1
+    count = singleton + short_link + long_link
+    print((
+        f"singleton: {singleton} {(singleton/count)*100:0.1f} | "
+        f"long_link: {long_link} {(long_link/count)*100:0.1f} | "
+        f"short_link: {short_link} {(short_link/count)*100:0.1f} | all: {count}"
+    ))
     for i in range(3):
         print(train_small_data[i])
     
