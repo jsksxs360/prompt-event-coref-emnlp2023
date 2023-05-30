@@ -177,6 +177,10 @@ def predict(
     type_match_mask_idx, arg_match_mask_idx = (
         -1, -1
     ) if prompt_type == 'ma_remove-match' else (
+        -1, encoding.char_to_token(prompt_data['arg_match_mask_offset'])
+    ) if prompt_type == 'ma_remove-subtype-match' else (
+        encoding.char_to_token(prompt_data['type_match_mask_offset']), -1
+    ) if prompt_type == 'ma_remove-arg-match' else (
         encoding.char_to_token(prompt_data['type_match_mask_offset']), 
         encoding.char_to_token(prompt_data['arg_match_mask_offset']), 
     )
@@ -224,6 +228,32 @@ def predict(
             for s_id in range(len(EVENT_SUBTYPES) + 1)
         ]
     } if prompt_type == 'ma_remove-match' else {
+        'batch_inputs': inputs, 
+        'batch_mask_idx': [mask_idx], 
+        'batch_arg_match_mask_idx': [arg_match_mask_idx], 
+        'batch_event_idx': [event_idx], 
+        'batch_t1_mask_idx': [e1_type_mask_idx], 
+        'batch_t2_mask_idx': [e2_type_mask_idx], 
+        'label_word_id': [verbalizer['non-coref']['id'], verbalizer['coref']['id']], 
+        'match_label_word_id': [verbalizer['match']['id'], verbalizer['mismatch']['id']], 
+        'subtype_label_word_id': [
+            verbalizer[id2subtype[s_id]]['id'] 
+            for s_id in range(len(EVENT_SUBTYPES) + 1)
+        ]
+    } if prompt_type == 'ma_remove-subtype-match' else {
+        'batch_inputs': inputs, 
+        'batch_mask_idx': [mask_idx], 
+        'batch_type_match_mask_idx': [type_match_mask_idx], 
+        'batch_event_idx': [event_idx], 
+        'batch_t1_mask_idx': [e1_type_mask_idx], 
+        'batch_t2_mask_idx': [e2_type_mask_idx], 
+        'label_word_id': [verbalizer['non-coref']['id'], verbalizer['coref']['id']], 
+        'match_label_word_id': [verbalizer['match']['id'], verbalizer['mismatch']['id']], 
+        'subtype_label_word_id': [
+            verbalizer[id2subtype[s_id]]['id'] 
+            for s_id in range(len(EVENT_SUBTYPES) + 1)
+        ]
+    } if prompt_type == 'ma_remove-arg-match' else {
         'batch_inputs': inputs, 
         'batch_mask_idx': [mask_idx], 
         'batch_type_match_mask_idx': [type_match_mask_idx], 
@@ -280,13 +310,14 @@ if __name__ == '__main__':
     connect_tokens = get_special_tokens(args.model_type, 'connect')
     match_tokens = get_special_tokens(args.model_type, 'match')
     event_subtype_tokens = get_special_tokens(args.model_type, 'event_subtype')
+    print('c' in args.prompt_type)
     sp_tokens = (
         base_sp_tokens + match_tokens 
         if args.prompt_type == 'ma_remove-anchor' else
         base_sp_tokens + event_subtype_tokens
         if args.prompt_type == 'ma_remove-match' else
         base_sp_tokens + connect_tokens + match_tokens + event_subtype_tokens 
-        if 'c' in args.prompt_type else 
+        if 'c' in args.prompt_type and not args.prompt_type.startswith('ma') else 
         base_sp_tokens + match_tokens + event_subtype_tokens
     )
     logger.info(f"adding special mark tokens {sp_tokens} to tokenizer...")
