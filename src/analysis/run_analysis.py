@@ -134,9 +134,8 @@ def error_analysis(
         pred_coref_file, pred_simi_coref_file, 
         mode='easy'
     )
-    total_num, correct_num = 0, 0
-    unrecognized_num, wrong_recognized_num, judge_error_num = 0, 0, 0
-    coref2coref
+    total_num, total_correct_num = 0, 0
+    unrecognized_num, misidentified_num, misjudged_num = 0, 0, 0
     coref2nocoref_num, nocoref2coref_num = 0, 0
     for doc_id in gold_coref_results:
         gold_unrecognized_event_pairs, gold_recognized_event_pairs = (
@@ -147,33 +146,36 @@ def error_analysis(
             pred_coref_results[doc_id]['recognized_event_pairs'], 
             pred_coref_results[doc_id]['wrong_event_pairs']
         )
-        # count event pair numbers
-        unrecognized, wrong_recognized, recognized = (
+        unrecognized, misidentified, recognized = (
             len(gold_unrecognized_event_pairs), 
             len(pred_wrong_event_pairs), 
             len(gold_recognized_event_pairs)
         )
-        total_num += (unrecognized + wrong_recognized + recognized)
+        total_num += (unrecognized + misidentified + recognized)
         unrecognized_num += unrecognized
-        wrong_recognized_num += wrong_recognized
+        misidentified_num += misidentified
         for pair_id, pair_results in gold_recognized_event_pairs.items():
             true_label, pred_label = str(pair_results['coref']), str(pred_recognized_event_pairs[pair_id]['coref'])
             if true_label == pred_label:
-                correct_num += 1
+                total_correct_num += 1
             else:
-                judge_error_num += 1
+                misjudged_num += 1
                 if true_label == '1':
                     coref2nocoref_num += 1
                 else:
                     nocoref2coref_num += 1
-    total_error_num = unrecognized_num + wrong_recognized_num + judge_error_num
-    assert total_num - correct_num == total_error_num
-    print(f'ACC: {correct_num} / {total_num} = {(correct_num/total_num)*100:.2f}%, total error: {total_error_num}')
-    print('error analysis ====>')
-    print(f'unrecognized: {unrecognized_num} / {total_error_num} = {(unrecognized_num/total_error_num)*100:.2f}')
-    print(f'wrong recognized: {wrong_recognized_num} / {total_error_num} = {(wrong_recognized_num/total_error_num)*100:.2f}')
-    print(f'recognize error: {unrecognized_num + wrong_recognized_num} / {total_error_num} = {(unrecognized_num + wrong_recognized_num/total_error_num)*100:.2f}')
-    print(f'')
+    total_wrong_num = unrecognized_num + misidentified_num + misjudged_num
+    assert total_correct_num + total_wrong_num == total_num
+    print(f'ACC: {total_correct_num} / {total_num} = {(total_correct_num/total_num)*100:.2f}%, total error: {total_wrong_num}')
+    print('errors ====>')
+    print(f'unrecognized: {unrecognized_num} / {total_wrong_num} = {(unrecognized_num/total_wrong_num)*100:.2f}%')
+    print(f'misidentified: {misidentified_num} / {total_wrong_num} = {(misidentified_num/total_wrong_num)*100:.2f}%')
+    print(f'recognize error: {unrecognized_num + misidentified_num} / {total_wrong_num} = {((unrecognized_num + misidentified_num)/total_wrong_num)*100:.2f}%')
+    print(f'misjudged: {misjudged_num} / {total_wrong_num} = {(misjudged_num/total_wrong_num)*100:.2f}%')
+    print(
+        f'coref2nocoref: {coref2nocoref_num} / {misjudged_num} = {(coref2nocoref_num/misjudged_num)*100:.2f}%, '
+        f'nocoref2coref: {nocoref2coref_num} / {misjudged_num} = {(nocoref2coref_num/misjudged_num)*100:.2f}%'
+    )
 
 gold_coref_file = '../../data/test.json'
 gold_simi_coref_file = '../../data/KnowledgeExtraction/simi_files/simi_omni_gold_test_related_info_0.75.json'
