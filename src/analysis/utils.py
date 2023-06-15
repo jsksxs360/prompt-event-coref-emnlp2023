@@ -1,22 +1,25 @@
 import json
 
 WORD_FILTER = set([
-    'i', 'me', 'you', 'he', 'him', 'she', 'her', 'it', 'we', 'us', 'you', 'they', 'them', 'my', 'mine', 'your', 'yours', 'his', 'her', 'hers', 
-    'its', 'our', 'ours', 'their', 'theirs', 'myself', 'yourself', 'himself', 'herself', 'itself', 'ourselves', 'yourselves', 'themselves', 
-    'other', 'others', 'this', 'that', 'these', 'those', 'who', 'whom', 'what', 'whose', 'which', 'that', 'all', 'each', 'either', 'neither', 
-    'one', 'any', 'oneself', 'such', 'same'
+    'you', 'your', 'yours', 'yourself', 'yourselves', 
+    'i', 'me', 'my', 'mine', 'myself', 'we', 'us', 'our', 'ours', 'ourselves', 
+    'he', 'his', 'him', 'himself', 'she', 'her', 'herself', 'hers', 
+    'it', 'its', 'itself', 'they', 'their', 'theirs', 'them', 'themselves', 'other', 'others', 
+    'this', 'that', 'these', 'those', 'who', 'whom', 'what', 'whose', 'which', 'where', 'why', 
+    'that', 'all', 'each', 'either', 'neither', 
+    'one', 'any', 'oneself', 'such', 'same', 'everyone', 'anyone', 'there', 
 ])
 
 def get_pred_related_info(simi_file:str) -> dict:
     '''
     # Returns:
-        related info dictionary: {doc_id: {event_offset: {
-            'arguments': [{"global_offset": 798, "mention": "We", "role": "participant"}]
-            'related_triggers': ['charged'], 
-            'related_arguments': [
-                {'global_offset': 1408, 'mention': 'Garvina', 'role': 'participant'}, 
-                {'global_offset': 1368, 'mention': 'Prosecutors', 'role': 'participant'}
-            ]
+        {doc_id: {event_offset: {\n
+            'arguments': [{"global_offset": 798, "mention": "We", "role": "participant"}]\n
+            'related_triggers': ['charged'], \n
+            'related_arguments': [\n
+                {'global_offset': 1408, 'mention': 'Garvina', 'role': 'participant'}, \n
+                {'global_offset': 1368, 'mention': 'Prosecutors', 'role': 'participant'}\n
+            ]\n
         }}}
     '''
     related_info_dict = {}
@@ -33,7 +36,7 @@ def get_pred_related_info(simi_file:str) -> dict:
             }
     return related_info_dict
 
-def select_args(my_args, other_related_info, match_other_related_args=True):
+def select_args(my_args:list, other_related_info:dict, match_other_related_args:bool) -> list:
     if not my_args:
         return []
     other_has_part, other_has_place = False, False
@@ -46,61 +49,90 @@ def select_args(my_args, other_related_info, match_other_related_args=True):
     for arg in other_args:
         if arg['role'] == 'participant':
             other_has_part = True
-        elif arg['role'] == 'place':
+        if arg['role'] == 'place':
             other_has_place = True    
     return [
         arg for arg in my_args 
         if (arg['role'] == 'participant' and other_has_part) or (arg['role'] == 'place' and other_has_place)
     ]
 
-def convert_args_to_str(args:list, use_filter=True):
+def convert_info_to_str(info:list, use_filter:bool):
     if use_filter:
-        args = filter(lambda x: x['mention'].lower() not in WORD_FILTER, args)
+        info = list(filter(lambda x: x['mention'].lower() not in WORD_FILTER, info))
     participants, places = (
-        [arg for arg in args if arg['role'] == 'participant'], 
-        [arg for arg in args if arg['role'] == 'place']
+        [arg for arg in info if arg['role'] == 'participant'], 
+        [arg for arg in info if arg['role'] == 'place']
     )
     return participants, places
 
-def convert_related_info_to_str(related_args:list, use_filter=True):
-    if use_filter:
-        related_args = list(filter(lambda x: x['mention'].lower() not in WORD_FILTER, related_args))
-    related_participants, related_places = (
-        [arg for arg in related_args if arg['role'] == 'participant'], 
-        [arg for arg in related_args if arg['role'] == 'place']
-    )
-    return related_participants, related_places
-
-def get_event_arg_status(prompt_type, e1_related_info, e2_related_info, select_arg_strategy):
-    if select_arg_strategy == 'filter_all':
-        e1_part, e1_place = convert_args_to_str(select_args(e1_related_info['arguments'], e2_related_info, 'o' in prompt_type), not prompt_type.startswith('m'))
-        e2_part, e2_place = convert_args_to_str(select_args(e2_related_info['arguments'], e1_related_info, 'o' in prompt_type), not prompt_type.startswith('m'))
-    else:
-        e1_part, e1_place = convert_args_to_str(e1_related_info['arguments'], not prompt_type.startswith('m'))
-        e2_part, e2_place = convert_args_to_str(e2_related_info['arguments'], not prompt_type.startswith('m'))
-    e1_related_triggers, e2_related_triggers = e1_related_info['related_triggers'], e2_related_info['related_triggers']
-    if not e1_related_triggers or not e2_related_triggers:
-        e1_related_triggers, e2_related_triggers = [], []
-    if select_arg_strategy in ['filter_all', 'filter_related_args']:
-        e1_related_part, e1_related_places = convert_related_info_to_str(select_args(e1_related_info['related_arguments'], e2_related_info, 'o' in prompt_type))
-        e2_related_part, e2_related_places = convert_related_info_to_str(select_args(e2_related_info['related_arguments'], e1_related_info, 'o' in prompt_type))
-    else:
-        e1_related_part, e1_related_places = convert_related_info_to_str(e1_related_info['related_arguments'])
-        e2_related_part, e2_related_places = convert_related_info_to_str(e2_related_info['related_arguments'])
+def get_event_arg_status_easy(e1_related_info, e2_related_info):
+    e1_args = e1_related_info['arguments']
+    e2_args = e2_related_info['arguments']
+    e1_part, e1_place = convert_info_to_str(e1_args, False)
+    e2_part, e2_place = convert_info_to_str(e2_args, False)
+    e1_related_triggers = e1_related_info['related_triggers']
+    e2_related_triggers = e2_related_info['related_triggers']
+    e1_related_args = e1_related_info['related_arguments']
+    e2_related_args = e2_related_info['related_arguments']
+    e1_related_part, e1_related_places = convert_info_to_str(e1_related_args, False)
+    e2_related_part, e2_related_places = convert_info_to_str(e2_related_args, False)
     return {
-        'e1_has_part': bool(e1_part), 'e1_has_place': bool(e1_place), 
+        'e1_has_part': bool(e1_part), 
+        'e1_has_place': bool(e1_place), 
         'e1_has_related_triggers': bool(e1_related_triggers), 
         'e1_has_related_part': bool(e1_related_part), 
         'e1_has_related_places': bool(e1_related_places), 
-        'e2_has_part': bool(e2_part), 'e2_has_place': bool(e2_place), 
+        'e2_has_part': bool(e2_part), 
+        'e2_has_place': bool(e2_place), 
         'e2_has_related_triggers': bool(e2_related_triggers), 
         'e2_has_related_part': bool(e2_related_part), 
         'e2_has_related_places': bool(e2_related_places), 
-        'e1_part': e1_part, 'e1_place': e1_place, 
+        'e1_part': e1_part, 
+        'e1_place': e1_place, 
         'e1_related_triggers': e1_related_triggers, 
         'e1_related_part': e1_related_part, 
         'e1_related_places': e1_related_places, 
-        'e2_part': e2_part, 'e2_place': e2_place, 
+        'e2_part': e2_part, 
+        'e2_place': e2_place, 
+        'e2_related_triggers': e2_related_triggers, 
+        'e2_related_part': e2_related_part, 
+        'e2_related_places': e2_related_places
+    }
+
+def get_event_arg_status_filter(prompt_type, e1_related_info, e2_related_info, select_arg_strategy):
+    e1_args = select_args(e1_related_info['arguments'], e2_related_info, 'tao' in prompt_type) \
+        if select_arg_strategy == 'filter_all' else e1_related_info['arguments']
+    e2_args = select_args(e2_related_info['arguments'], e1_related_info, 'tao' in prompt_type) \
+        if select_arg_strategy == 'filter_all' else e2_related_info['arguments']
+    e1_part, e1_place = convert_info_to_str(e1_args, not prompt_type.startswith('m'))
+    e2_part, e2_place = convert_info_to_str(e2_args, not prompt_type.startswith('m'))
+    e1_related_triggers, e2_related_triggers = e1_related_info['related_triggers'], e2_related_info['related_triggers']
+    if not e1_related_triggers or not e2_related_triggers:
+        e1_related_triggers, e2_related_triggers = [], []
+    e1_related_args = select_args(e1_related_info['related_arguments'], e2_related_info, 'tao' in prompt_type) \
+        if select_arg_strategy in ['filter_all', 'filter_related_args'] else e1_related_info['related_arguments']
+    e2_related_args = select_args(e2_related_info['related_arguments'], e1_related_info, 'tao' in prompt_type) \
+        if select_arg_strategy in ['filter_all', 'filter_related_args'] else e2_related_info['related_arguments']
+    e1_related_part, e1_related_places = convert_info_to_str(e1_related_args, True)
+    e2_related_part, e2_related_places = convert_info_to_str(e2_related_args, True)
+    return {
+        'e1_has_part': bool(e1_part), 
+        'e1_has_place': bool(e1_place), 
+        'e1_has_related_triggers': bool(e1_related_triggers), 
+        'e1_has_related_part': bool(e1_related_part), 
+        'e1_has_related_places': bool(e1_related_places), 
+        'e2_has_part': bool(e2_part), 
+        'e2_has_place': bool(e2_place), 
+        'e2_has_related_triggers': bool(e2_related_triggers), 
+        'e2_has_related_part': bool(e2_related_part), 
+        'e2_has_related_places': bool(e2_related_places), 
+        'e1_part': e1_part, 
+        'e1_place': e1_place, 
+        'e1_related_triggers': e1_related_triggers, 
+        'e1_related_part': e1_related_part, 
+        'e1_related_places': e1_related_places, 
+        'e2_part': e2_part, 
+        'e2_place': e2_place, 
         'e2_related_triggers': e2_related_triggers, 
         'e2_related_part': e2_related_part, 
         'e2_related_places': e2_related_places
@@ -108,17 +140,17 @@ def get_event_arg_status(prompt_type, e1_related_info, e2_related_info, select_a
 
 def pretty_event_mention(
     sentences, sent_idx, sent_offset, trigger, 
-    start_tag='[EVENT]', end_tag='[/EVENT]', windows=2
+    start_tag='[EVENT]', end_tag='[/EVENT]', context_windows=2
     ):
+    sentence = sentences[sent_idx]['text']
+    assert sentence[sent_offset:sent_offset + len(trigger)] == trigger
     before_sentence, after_sentence = '', ''
-    for i in range(1,1+windows):
+    for i in range(1,1+context_windows):
         if sent_idx - i >= 0:
             before_sentence = sentences[sent_idx - i]['text'] + ' ' + before_sentence
         if sent_idx + i < len(sentences):
             after_sentence += ' ' + sentences[sent_idx + i]['text']
-    sentence = sentences[sent_idx]['text']
-    assert sentence[sent_offset:sent_offset + len(trigger)] == trigger
-    mention = "{}{}{} {} {}{}{}".format(
+    return "{}{}{} {} {}{}{}".format(
         before_sentence, 
         sentence[:sent_offset], 
         start_tag, 
@@ -127,36 +159,47 @@ def pretty_event_mention(
         sentence[sent_offset + len(trigger):], 
         after_sentence
     )
-    return mention
 
 def get_event_pair_info(
-    prompt_type:str, select_arg_strategy:str, 
     gold_test_file:str, gold_test_simi_file:str, 
-    pred_test_file:str, pred_test_simi_file:str
+    pred_test_file:str, pred_test_simi_file:str,
+    mode:str, prompt_type:str=None, select_arg_strategy:str=None
     ):
     '''get event pair information
+    # Args:
+        mode:
+            easy: output directly according to the extracted arguments
+            filter: filter arguments by prompt type and select arg strategy
     # Returns:
-    event_pair_info_dict: 
-        {
-            doc_id: {
-                {e_i_start}-{e_j_start}: {
-                    'e_i_pretty_sent', 'e_j_pretty_sent',
-                    'e_i_has_part','e_i_has_place': True/False, 
-                    'e_i_has_related_triggers': True/False,  
-                    'e_i_has_related_part': True/False, 
-                    'e_i_has_related_places': True/False, 
-                    ...
-                    'e_i_part', 'e_i_place', 
-                    'e_i_related_triggers', 
-                    'e_i_related_part', 
-                    'e_i_related_places',
-                    'sent_dist': sentence distance
-                }, ...
+    {
+        doc_id: {
+            {e_i_start}-{e_j_start}: {
+                'e_i_pretty_sent', 'e_j_pretty_sent', \n
+                'e_i_has_part': True/False, \n
+                'e_i_has_place': True/False, \n
+                'e_i_has_related_triggers': True/False, \n
+                'e_i_has_related_part': True/False, \n
+                'e_i_has_related_places': True/False, \n
+                ...\n
+                'e_i_part', \n
+                'e_i_place', \n
+                'e_i_related_triggers', \n
+                'e_i_related_part', \n
+                'e_i_related_places', \n
+                'sent_dist': sentence distance\n
             }, ...
-        }
+        }, ...
+    }
     '''
+    assert (mode == 'filter') == bool(prompt_type and select_arg_strategy)
+
     def _find_event_sent(event_start, trigger, sent_list):
         '''find out which sentence the event come from
+        # Returns:
+        idx:
+            sentence index in the sentence list
+        e_s_start:
+            trigger offset in the host sentence
         '''
         for idx, sent in enumerate(sent_list):
             s_start, s_end = sent['start'], sent['start'] + len(sent['text']) - 1
@@ -167,7 +210,7 @@ def get_event_pair_info(
         print(event_start, trigger, '\n')
         for sent in sent_list:
             print(sent['start'], sent['start'] + len(sent['text']) - 1)
-        return None, None
+        raise ValueError(f'no matching host sentence for event: {event_start}')
 
     event_pair_info_dict = {}
     gold_related_dict = get_pred_related_info(gold_test_simi_file)
@@ -188,49 +231,38 @@ def get_event_pair_info(
                     e_j_pretty_sent = pretty_event_mention(sentences, events[j]['sent_idx'], events[j]['sent_start'], events[j]['trigger'])
                     e_j_related_info = gold_related_dict[sample['doc_id']][e_j_start]
                     e_j_sent_idx = events[j]['sent_idx']
-                    arg_status = get_event_arg_status(prompt_type, e_i_related_info, e_j_related_info, select_arg_strategy)
-                    if e_i_start < e_j_start:
-                        event_pairs[f'{e_i_start}-{e_j_start}'] = {
-                            'e_i_pretty_sent': e_i_pretty_sent, 'e_j_pretty_sent': e_j_pretty_sent, 
-                            'e_i_has_part': arg_status['e1_has_part'], 'e_i_has_place': arg_status['e1_has_place'], 
-                            'e_i_has_related_triggers': arg_status['e1_has_related_triggers'], 
-                            'e_i_has_related_part': arg_status['e1_has_related_part'], 
-                            'e_i_has_related_places': arg_status['e1_has_related_places'], 
-                            'e_j_has_part': arg_status['e2_has_part'], 'e_j_has_place': arg_status['e2_has_place'], 
-                            'e_j_has_related_triggers': arg_status['e2_has_related_triggers'], 
-                            'e_j_has_related_part': arg_status['e2_has_related_part'], 
-                            'e_j_has_related_places': arg_status['e2_has_related_places'], 
-                            'sent_dist': abs(int(e_i_sent_idx) - int(e_j_sent_idx)), 
-                            'e_i_part': arg_status['e1_part'], 'e_i_place': arg_status['e1_place'], 
-                            'e_i_related_triggers': arg_status['e1_related_triggers'], 
-                            'e_i_related_part': arg_status['e1_related_part'], 
-                            'e_i_related_places': arg_status['e1_related_places'], 
-                            'e_j_part': arg_status['e2_part'], 'e_j_place': arg_status['e2_place'], 
-                            'e_j_related_triggers': arg_status['e2_related_triggers'], 
-                            'e_j_related_part': arg_status['e2_related_part'], 
-                            'e_j_related_places': arg_status['e2_related_places']
-                        }
-                    else:
-                        event_pairs[f'{e_j_start}-{e_i_start}'] = {
-                            'e_i_pretty_sent': e_i_pretty_sent, 'e_j_pretty_sent': e_j_pretty_sent, 
-                            'e_i_has_part': arg_status['e2_has_part'], 'e_i_has_place': arg_status['e2_has_place'], 
-                            'e_i_has_related_triggers': arg_status['e2_has_related_triggers'], 
-                            'e_i_has_related_part': arg_status['e2_has_related_part'], 
-                            'e_i_has_related_places': arg_status['e2_has_related_places'], 
-                            'e_j_has_part': arg_status['e1_has_part'], 'e_j_has_place': arg_status['e1_has_place'], 
-                            'e_j_has_related_triggers': arg_status['e1_has_related_triggers'], 
-                            'e_j_has_related_part': arg_status['e1_has_related_part'], 
-                            'e_j_has_related_places': arg_status['e1_has_related_places'], 
-                            'sent_dist': abs(int(e_i_sent_idx) - int(e_j_sent_idx)), 
-                            'e_i_part': arg_status['e2_part'], 'e_i_place': arg_status['e2_place'], 
-                            'e_i_related_triggers': arg_status['e2_related_triggers'], 
-                            'e_i_related_part': arg_status['e2_related_part'], 
-                            'e_i_related_places': arg_status['e2_related_places'], 
-                            'e_j_part': arg_status['e1_part'], 'e_j_place': arg_status['e1_place'], 
-                            'e_j_related_triggers': arg_status['e1_related_triggers'], 
-                            'e_j_related_part': arg_status['e1_related_part'], 
-                            'e_j_related_places': arg_status['e1_related_places']
-                        }
+                    if e_i_start > e_j_start: # make shure e_i_start < e_j_start
+                        e_i_start, e_j_start = e_j_start, e_i_start
+                        e_i_pretty_sent, e_j_pretty_sent = e_j_pretty_sent, e_i_pretty_sent
+                        e_i_related_info, e_j_related_info = e_j_related_info, e_i_related_info
+                        e_i_sent_idx, e_j_sent_idx = e_j_sent_idx, e_i_sent_idx
+                    arg_status = get_event_arg_status_easy(e_i_related_info, e_j_related_info) if mode == 'easy' else \
+                        get_event_arg_status_filter(prompt_type, e_i_related_info, e_j_related_info, select_arg_strategy)
+                    event_pairs[f'{e_i_start}-{e_j_start}'] = {
+                        'e_i_pretty_sent': e_i_pretty_sent, # event i
+                        'e_i_has_part': arg_status['e1_has_part'], 
+                        'e_i_has_place': arg_status['e1_has_place'], 
+                        'e_i_has_related_triggers': arg_status['e1_has_related_triggers'], 
+                        'e_i_has_related_part': arg_status['e1_has_related_part'], 
+                        'e_i_has_related_places': arg_status['e1_has_related_places'], 
+                        'e_i_part': arg_status['e1_part'], 
+                        'e_i_place': arg_status['e1_place'], 
+                        'e_i_related_triggers': arg_status['e1_related_triggers'], 
+                        'e_i_related_part': arg_status['e1_related_part'], 
+                        'e_i_related_places': arg_status['e1_related_places'], 
+                        'e_j_pretty_sent': e_j_pretty_sent, # event j
+                        'e_j_has_part': arg_status['e2_has_part'], 
+                        'e_j_has_place': arg_status['e2_has_place'], 
+                        'e_j_has_related_triggers': arg_status['e2_has_related_triggers'], 
+                        'e_j_has_related_part': arg_status['e2_has_related_part'], 
+                        'e_j_has_related_places': arg_status['e2_has_related_places'], 
+                        'e_j_part': arg_status['e2_part'], 
+                        'e_j_place': arg_status['e2_place'], 
+                        'e_j_related_triggers': arg_status['e2_related_triggers'], 
+                        'e_j_related_part': arg_status['e2_related_part'], 
+                        'e_j_related_places': arg_status['e2_related_places'], 
+                        'sent_dist': abs(int(e_i_sent_idx) - int(e_j_sent_idx))
+                    }
             event_pair_info_dict[sample['doc_id']] = event_pairs
     with open(pred_test_file, 'rt', encoding='utf-8') as f:
         for line in f:
@@ -239,38 +271,41 @@ def get_event_pair_info(
             sentences = sample['sentences']
             for i in range(len(events) - 1):
                 e_i_start = events[i]['start']
-                e_i_sent_idx, e_i_sent_start = _find_event_sent(events[i]['start'], events[i]
-                ['trigger'], sentences)
-                assert e_i_sent_idx is not None
+                e_i_sent_idx, e_i_sent_start = _find_event_sent(events[i]['start'], events[i]['trigger'], sentences)
                 e_i_pretty_sent = pretty_event_mention(sentences, e_i_sent_idx, e_i_sent_start, events[i]['trigger'])
                 e_i_related_info = pred_related_dict[sample['doc_id']][e_i_start]
                 for j in range(i + 1, len(events)):
                     e_j_start = events[j]['start']
                     e_j_sent_idx, e_j_sent_start = _find_event_sent(events[j]['start'], events[j]['trigger'], sentences)
-                    assert e_j_sent_idx is not None
                     e_j_pretty_sent = pretty_event_mention(sentences, e_j_sent_idx, e_j_sent_start, events[j]['trigger'])
                     e_j_related_info = pred_related_dict[sample['doc_id']][e_j_start]
                     assert e_i_start < e_j_start
-                    arg_status = get_event_arg_status(prompt_type, e_i_related_info, e_j_related_info, select_arg_strategy)
+                    arg_status = get_event_arg_status_easy(e_i_related_info, e_j_related_info) if mode == 'easy' else \
+                        get_event_arg_status_filter(prompt_type, e_i_related_info, e_j_related_info, select_arg_strategy)
                     event_pair_info_dict[sample['doc_id']][f'{e_i_start}-{e_j_start}'] = { # overwrite same event-pair data
-                        'e_i_pretty_sent': e_i_pretty_sent, 'e_j_pretty_sent': e_j_pretty_sent, 
-                        'e_i_has_part': arg_status['e1_has_part'], 'e_i_has_place': arg_status['e1_has_place'], 
+                        'e_i_pretty_sent': e_i_pretty_sent, # event i
+                        'e_i_has_part': arg_status['e1_has_part'], 
+                        'e_i_has_place': arg_status['e1_has_place'], 
                         'e_i_has_related_triggers': arg_status['e1_has_related_triggers'], 
                         'e_i_has_related_part': arg_status['e1_has_related_part'], 
                         'e_i_has_related_places': arg_status['e1_has_related_places'], 
-                        'e_j_has_part': arg_status['e2_has_part'], 'e_j_has_place': arg_status['e2_has_place'], 
-                        'e_j_has_related_triggers': arg_status['e2_has_related_triggers'], 
-                        'e_j_has_related_part': arg_status['e2_has_related_part'], 
-                        'e_j_has_related_places': arg_status['e2_has_related_places'], 
-                        'sent_dist': abs(int(e_i_sent_idx) - int(e_j_sent_idx)), 
-                        'e_i_part': arg_status['e1_part'], 'e_i_place': arg_status['e1_place'], 
+                        'e_i_part': arg_status['e1_part'], 
+                        'e_i_place': arg_status['e1_place'], 
                         'e_i_related_triggers': arg_status['e1_related_triggers'], 
                         'e_i_related_part': arg_status['e1_related_part'], 
                         'e_i_related_places': arg_status['e1_related_places'], 
-                        'e_j_part': arg_status['e2_part'], 'e_j_place': arg_status['e2_place'], 
+                        'e_j_pretty_sent': e_j_pretty_sent, # event j
+                        'e_j_has_part': arg_status['e2_has_part'], 
+                        'e_j_has_place': arg_status['e2_has_place'], 
+                        'e_j_has_related_triggers': arg_status['e2_has_related_triggers'], 
+                        'e_j_has_related_part': arg_status['e2_has_related_part'], 
+                        'e_j_has_related_places': arg_status['e2_has_related_places'], 
+                        'e_j_part': arg_status['e2_part'], 
+                        'e_j_place': arg_status['e2_place'], 
                         'e_j_related_triggers': arg_status['e2_related_triggers'], 
                         'e_j_related_part': arg_status['e2_related_part'], 
-                        'e_j_related_places': arg_status['e2_related_places']
+                        'e_j_related_places': arg_status['e2_related_places'], 
+                        'sent_dist': abs(int(e_i_sent_idx) - int(e_j_sent_idx))
                     }
     return event_pair_info_dict
 
@@ -280,7 +315,7 @@ def get_gold_corefs(gold_test_file:str) -> dict:
         for cluster in clusters:
             if event_id in cluster['events']:
                 return cluster['hopper_id'], len(cluster['events'])
-        return None, None
+        raise ValueError(f'Unknown event id: {event_id}')
 
     gold_dict = {}
     with open(gold_test_file, 'rt', encoding='utf-8') as f:
@@ -292,21 +327,16 @@ def get_gold_corefs(gold_test_file:str) -> dict:
             for i in range(len(events) - 1):
                 e_i_start = events[i]['start']
                 e_i_cluster_id, e_i_link_len = _get_event_cluster_id_and_link_len(events[i]['event_id'], clusters)
-                assert e_i_cluster_id is not None
                 for j in range(i + 1, len(events)):
                     e_j_start = events[j]['start']
                     e_j_cluster_id, e_j_link_len = _get_event_cluster_id_and_link_len(events[j]['event_id'], clusters)
-                    assert e_j_cluster_id is not None
-                    if e_i_start < e_j_start:
-                        event_pairs[f'{e_i_start}-{e_j_start}'] = {
-                            'coref': 1 if e_i_cluster_id == e_j_cluster_id else 0, 
-                            'e_i_link_len': e_i_link_len, 'e_j_link_len': e_j_link_len
-                        }
-                    else:
-                        event_pairs[f'{e_j_start}-{e_i_start}'] = {
-                            'coref': 1 if e_i_cluster_id == e_j_cluster_id else 0, 
-                            'e_i_link_len': e_j_link_len, 'e_j_link_len': e_i_link_len
-                        }
+                    if e_i_start > e_j_start:
+                        e_i_start, e_j_start = e_j_start, e_i_start
+                        e_i_cluster_id, e_i_link_len, e_j_cluster_id, e_j_link_len = e_j_cluster_id, e_j_link_len, e_i_cluster_id, e_i_link_len
+                    event_pairs[f'{e_i_start}-{e_j_start}'] = {
+                        'coref': 1 if e_i_cluster_id == e_j_cluster_id else 0, 
+                        'e_i_link_len': e_i_link_len, 'e_j_link_len': e_j_link_len
+                    }
             gold_dict[sample['doc_id']] = event_pairs
     return gold_dict
 
@@ -334,14 +364,53 @@ def get_pred_coref_results(pred_test_file:str) -> dict:
     return pred_dict
 
 def get_event_pair_set(
-    prompt_type, select_arg_strategy, 
-    gold_coref_file, gold_simi_coref_file, 
-    pred_coref_file, pred_simi_coref_file
+    gold_coref_file:str, gold_simi_coref_file:str, 
+    pred_coref_file:str, pred_simi_coref_file:str, 
+    mode:str, prompt_type:str=None, select_arg_strategy:str=None, 
     ):
+    '''get all event pair info
+    # Args:
+        mode:
+            easy: output directly according to the extracted arguments
+            filter: filter arguments by prompt type and select arg strategy
+    # Returns:
+    event_pair_info:
+        event pair argument & related info dict, {
+            doc_id: {
+                e_i_start-e_j_start: {
+                    'e_i_pretty_sent', 'e_j_pretty_sent', ...
+                }
+            }
+        }
+    new_gold_coref_results: 
+        {
+            doc_id: {
+                'unrecognized_event_pairs': {
+                    'e_i_start-e_j_start': {'coref', 'e_i_link_len', 'e_j_link_len'}
+                }, 
+                'recognized_event_pairs': {
+                    'e_i_start-e_j_start': {'coref', 'e_i_link_len', 'e_j_link_len'}
+                }
+            }
+        }
+    new_pred_coref_results:
+        {
+            doc_id: {
+                'recognized_event_pairs': {
+                    'e_i_start-e_j_start': {'coref', 'e_i_link_len', 'e_j_link_len'}
+                }, 
+                'wrong_event_pairs': {
+                    'e_i_start-e_j_start': {'coref', 'e_i_link_len', 'e_j_link_len'}
+                }
+            }
+        }
+    '''
+    assert (mode == 'filter') == bool(prompt_type and select_arg_strategy)
+
     event_pair_info = get_event_pair_info(
-        prompt_type, select_arg_strategy, 
         gold_coref_file, gold_simi_coref_file, 
-        pred_coref_file, pred_simi_coref_file
+        pred_coref_file, pred_simi_coref_file, 
+        mode, prompt_type, select_arg_strategy, 
     )
     gold_coref_results = get_gold_corefs(gold_coref_file)
     pred_coref_results = get_pred_coref_results(pred_coref_file)
@@ -375,4 +444,5 @@ def get_event_pair_set(
             'wrong_event_pairs': wrong_event_pairs
         }
 
+    assert sum([len(res['recognized_event_pairs']) for res in new_gold_coref_results.values()]) == sum([len(res['recognized_event_pairs']) for res in new_pred_coref_results.values()]) 
     return event_pair_info, new_gold_coref_results, new_pred_coref_results
