@@ -1,9 +1,3 @@
-mkdir -p ./PT_MODELS/allenai/longformer-large-4096/
-wget -P ./PT_MODELS/allenai/longformer-large-4096/ https://huggingface.co/allenai/longformer-large-4096/resolve/main/pytorch_model.bin
-wget -P ./PT_MODELS/allenai/longformer-large-4096/ https://huggingface.co/allenai/longformer-large-4096/resolve/main/config.json
-wget -P ./PT_MODELS/allenai/longformer-large-4096/ https://huggingface.co/allenai/longformer-large-4096/resolve/main/merges.txt
-wget -P ./PT_MODELS/allenai/longformer-large-4096/ https://huggingface.co/allenai/longformer-large-4096/resolve/main/tokenizer.json
-wget -P ./PT_MODELS/allenai/longformer-large-4096/ https://huggingface.co/allenai/longformer-large-4096/resolve/main/vocab.json
 mkdir -p ./PT_MODELS/bert-large-cased/
 wget -P ./PT_MODELS/bert-large-cased/ https://huggingface.co/bert-large-cased/resolve/main/pytorch_model.bin
 wget -P ./PT_MODELS/bert-large-cased/ https://huggingface.co/bert-large-cased/resolve/main/README.md
@@ -18,12 +12,6 @@ wget -P ./PT_MODELS/roberta-large/ https://huggingface.co/roberta-large/resolve/
 wget -P ./PT_MODELS/roberta-large/ https://huggingface.co/roberta-large/resolve/main/merges.txt
 wget -P ./PT_MODELS/roberta-large/ https://huggingface.co/roberta-large/resolve/main/tokenizer.json
 wget -P ./PT_MODELS/roberta-large/ https://huggingface.co/roberta-large/resolve/main/vocab.json
-mkdir -p ./PT_MODELS/microsoft/deberta-v3-large/
-wget -P ./PT_MODELS/microsoft/deberta-v3-large/ https://huggingface.co/microsoft/deberta-v3-large/resolve/main/pytorch_model.bin
-wget -P ./PT_MODELS/microsoft/deberta-v3-large/ https://huggingface.co/microsoft/deberta-v3-large/resolve/main/README.md
-wget -P ./PT_MODELS/microsoft/deberta-v3-large/ https://huggingface.co/microsoft/deberta-v3-large/resolve/main/config.json
-wget -P ./PT_MODELS/microsoft/deberta-v3-large/ https://huggingface.co/microsoft/deberta-v3-large/resolve/main/spm.model
-wget -P ./PT_MODELS/microsoft/deberta-v3-large/ https://huggingface.co/microsoft/deberta-v3-large/resolve/main/tokenizer_config.json
 mkdir -p ./PT_MODELS/google/mt5-base/
 wget -P ./PT_MODELS/google/mt5-base/ https://huggingface.co/google/mt5-base/resolve/main/pytorch_model.bin
 wget -P ./PT_MODELS/google/mt5-base/ https://huggingface.co/google/mt5-base/resolve/main/README.md

@@ -153,40 +153,40 @@ def create_simi_event_file_for_testfile(data_file, arg_file, simi_file, save_fil
             f.write(json.dumps(example_result) + '\n')
 
 cosine_threshold = 0.75
-arg_file_type = 'chatgpt3.5'
+arg_file_type = 'omni'
 
-# create_simi_event_file(
-#     '../train_filtered.json', 
-#     f'./argument_files/{arg_file_type}_train_pred_args.json', 
-#     '../train_filtered_with_cos.json', 
-#     f'./simi_files/simi_{arg_file_type}_train_related_info_{cosine_threshold}.json', 
-#     cosine_threshold, 
-#     arg_file_type
-# )
-# create_simi_event_file(
-#     '../dev_filtered.json', 
-#     f'./argument_files/{arg_file_type}_dev_pred_args.json', 
-#     '../dev_filtered_with_cos.json', 
-#     f'./simi_files/simi_{arg_file_type}_dev_related_info_{cosine_threshold}.json', 
-#     cosine_threshold, 
-#     arg_file_type
-# )
-# create_simi_event_file(
-#     '../test_filtered.json', 
-#     f'./argument_files/{arg_file_type}_gold_test_pred_args.json', 
-#     '../test_filtered_with_cos.json', 
-#     f'./simi_files/simi_{arg_file_type}_gold_test_related_info_{cosine_threshold}.json', 
-#     cosine_threshold, 
-#     arg_file_type
-# )
-# create_simi_event_file_for_testfile(
-#     '../epoch_3_test_pred_events.json', 
-#     f'./argument_files/{arg_file_type}_epoch_3_test_pred_args.json', 
-#     '../epoch_3_test_pred_events_with_cos.json', 
-#     f'./simi_files/simi_{arg_file_type}_epoch_3_test_related_info_{cosine_threshold}.json', 
-#     cosine_threshold, 
-#     arg_file_type
-# )
+create_simi_event_file(
+    '../train_filtered.json', 
+    f'./argument_files/{arg_file_type}_train_pred_args.json', 
+    '../train_filtered_with_cos.json', 
+    f'./simi_files/simi_{arg_file_type}_train_related_info_{cosine_threshold}.json', 
+    cosine_threshold, 
+    arg_file_type
+)
+create_simi_event_file(
+    '../dev_filtered.json', 
+    f'./argument_files/{arg_file_type}_dev_pred_args.json', 
+    '../dev_filtered_with_cos.json', 
+    f'./simi_files/simi_{arg_file_type}_dev_related_info_{cosine_threshold}.json', 
+    cosine_threshold, 
+    arg_file_type
+)
+create_simi_event_file(
+    '../test_filtered.json', 
+    f'./argument_files/{arg_file_type}_gold_test_pred_args.json', 
+    '../test_filtered_with_cos.json', 
+    f'./simi_files/simi_{arg_file_type}_gold_test_related_info_{cosine_threshold}.json', 
+    cosine_threshold, 
+    arg_file_type
+)
+create_simi_event_file_for_testfile(
+    '../epoch_3_test_pred_events.json', 
+    f'./argument_files/{arg_file_type}_epoch_3_test_pred_args.json', 
+    '../epoch_3_test_pred_events_with_cos.json', 
+    f'./simi_files/simi_{arg_file_type}_epoch_3_test_related_info_{cosine_threshold}.json', 
+    cosine_threshold, 
+    arg_file_type
+)
 
 def analysis(simi_file, ):
     word_filter = set([
