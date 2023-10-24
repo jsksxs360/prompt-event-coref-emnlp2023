@@ -125,9 +125,9 @@ print(f"ev3[{ev1['trigger']}] - ev4[{ev5['trigger']}]: {res['label']} ({res['pro
 
 ```
 ev1[suicide] - ev5[death]: coref (0.9997438788414001)
-ev1[suicide] - ev3[death]: non-coref (0.9977204203605652)
-ev1[suicide] - ev4[death]: non-coref (0.9989845156669617)
-ev3[suicide] - ev4[death]: coref (0.999984622001648)
+ev1[suicide] - ev3[left]: non-coref (0.9977204203605652)
+ev1[suicide] - ev4[damage]: non-coref (0.9989845156669617)
+ev3[left] - ev4[damage]: coref (0.999984622001648)
 ```
 
 You can modify the [demo.py](https://github.com/jsksxs360/prompt-event-coref-emnlp2023/blob/main/src/demo.py) file to try it out!
