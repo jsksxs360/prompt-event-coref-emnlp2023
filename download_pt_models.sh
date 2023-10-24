@@ -12,11 +12,3 @@ wget -P ./PT_MODELS/roberta-large/ https://huggingface.co/roberta-large/resolve/
 wget -P ./PT_MODELS/roberta-large/ https://huggingface.co/roberta-large/resolve/main/merges.txt
 wget -P ./PT_MODELS/roberta-large/ https://huggingface.co/roberta-large/resolve/main/tokenizer.json
 wget -P ./PT_MODELS/roberta-large/ https://huggingface.co/roberta-large/resolve/main/vocab.json
-mkdir -p ./PT_MODELS/google/mt5-base/
-wget -P ./PT_MODELS/google/mt5-base/ https://huggingface.co/google/mt5-base/resolve/main/pytorch_model.bin
-wget -P ./PT_MODELS/google/mt5-base/ https://huggingface.co/google/mt5-base/resolve/main/README.md
-wget -P ./PT_MODELS/google/mt5-base/ https://huggingface.co/google/mt5-base/resolve/main/config.json
-wget -P ./PT_MODELS/google/mt5-base/ https://huggingface.co/google/mt5-base/resolve/main/generation_config.json
-wget -P ./PT_MODELS/google/mt5-base/ https://huggingface.co/google/mt5-base/resolve/main/special_tokens_map.json
-wget -P ./PT_MODELS/google/mt5-base/ https://huggingface.co/google/mt5-base/resolve/main/spiece.model
-wget -P ./PT_MODELS/google/mt5-base/ https://huggingface.co/google/mt5-base/resolve/main/tokenizer_config.json

@@ -1,14 +1,140 @@
-# CorefPrompt
+# CorefPrompt: Prompt-based Event Coreference Resolution by Measuring Event Type and Argument Compatibilities
+
+This code was used in the paper:
+
+"[CorefPrompt: Prompt-based Event Coreference Resolution by Measuring Event Type and Argument Compatibilities](https://arxiv.org/abs/2310.14512)"
+Sheng Xu, Peifeng Li and Qiaoming Zhu. EMNLP 2023.
+
+A simple prompt-based model implemented in PyTorch for resolving within-document event coreference. The model was trained and evaluated on the KBP corpus.
+
+![main](CorefPrompt.jpg)
+
+We first utilize a prefix template $\mathcal{T}_{pre}$ to inform PTM what to focus on when encoding, then mark event types and arguments by inserting anchor templates $\mathcal{T}_{anc}$ around event mentions, and finally demonstrate the reasoning process of ECR using an inference template $\mathcal{T}_{inf}$ which introduces two auxiliary prompt tasks, event-type compatibility and argument compatibility.
 
 ## Set up
 
-#### Requirements
-
-Set up a Python virtual environment and run:
+Set up a Python virtual environment and install packages using the `requirements` file:
 
 ```bash
+conda create -n corefprompt python=3.9
+conda activate corefprompt
 python3 -m pip install -r requirements.txt
 ```
+
+Download the pre-trained model weights used in our experiment from Huggingface [Model Hub](https://huggingface.co/models):
+
+```bash
+bash download_pt_models.sh
+```
+
+**Note:** this script will save all downloaded weights in `./PT_MODELS/`.
+
+## How to use
+
+It is easy to use our model to predict event coreferences. For example, consider the following text, which contains seven event mentions ($ev_1$-$ev_7$) and ten entity mentions ($arg_1$-$arg_{10}$) that serve as arguments. 
+
+$\{$Former Pakistani dancing girl$\}arg_1$ commits $\{$suicide$\}ev_1$ 12 years after horrific $\{$acid$\}arg_2$ $\{$attack$\}ev_2$ which $\{$left$\} ev_3$ $\{$her$\} arg_3$ looking "not human". $\{$She$\} arg_4$ had undergone 39 separate surgeries to repair $\{$damage$\} ev_4$. Leapt to $\{$her$\} arg_5$ $\{$death$\} ev_5$ from $\{$sixth floor Rome building$\} arg_6$ $\{$earlier this month$\} arg_7$. $\{$Her ex-husband$\} arg_8$ was $\{$charged$\} ev_6$ with $\{$attempted murder$\} arg_9$ in $\{$2002$\} arg_{10}$ but has since been $\{$acquitted$\} ev_7$.
+
+Among them, 
+
+- the death event mention $ev_1$ with the argument $arg_1$ and the death event mention $ev_5$ with the arguments $arg_5, arg_6,$ and $arg_7$ are coreferential, as both of them describe the girl's suicide by jumping off a building; 
+- the injury event mention $ev_3$ with the arguments $arg_2$ and $arg_3$ and the injury event $ev_4$ with the argument $arg_4$ are coreferential, as both of them describe the girl's disfigurement; 
+- other event mentions are singletons.
+
+Let's apply our CorefPrompt to predict the coreference of events $ev_{1},ev_3,ev_4$ and $ev_{5}$. 
+
+**Note:** For event arguments, we only care about participants and locations.
+
+```python
+document = 'Former Pakistani dancing girl commits suicide 12 years after horrific acid attack which left her looking "not human". She had undergone 39 separate surgeries to repair damage. Leapt to her death from sixth floor Rome building earlier this month. Her ex-husband was charged with attempted murder in 2002 but has since been acquitted.'
+
+ev1 = {
+    'offset': 38, 
+    'trigger': 'suicide', 
+    'args': [
+        {'mention': 'Former Pakistani dancing girl', 'role': 'participant'}
+    ]
+}
+ev3 = {
+    'offset': 88, 
+    'trigger': 'left', 
+    'args': [
+        {'mention': 'acid', 'role': 'participant'}, 
+        {'mention': 'her', 'role': 'participant'}
+    ]
+}
+ev4 = {
+    'offset': 168, 
+    'trigger': 'damage', 
+    'args': [
+        {'mention': 'She', 'role': 'participant'}
+    ]
+}
+ev5 = {
+    'offset': 189, 
+    'trigger': 'death', 
+    'args': [
+        {'mention': 'her', 'role': 'participant'}, 
+        {'mention': 'sixth floor Rome building', 'role': 'place'}
+    ]
+}
+```
+
+First, we need to set the `args` variable that organizes all parameters:
+
+```python
+from corefprompt import args, CorefPrompt
+
+args.model_checkpoint='../PT_MODELS/roberta-large/'
+args.best_weights='./epoch_2_dev_f1_71.5876_weights.bin'
+
+coref_model = CorefPrompt(args.model_checkpoint, args.best_weights, args)
+```
+
+Here, `args.model_checkpoint` and `args.best_weights` are paths to the checkpoint and our trained weights, respectively.
+
+> RoBERTa checkpoint can be downloaded by running the script `download_pt_models.sh` above, and our best weights `epoch_2_dev_f1_71.5876_weights.bin` can be downloaded from [Google Drive](https://drive.google.com/drive/folders/1XoJBHIEaCbH8bf0Sdd9vJVqNRS6r9SUV?usp=share_link).
+
+We provide two functions to predict event coreferences:
+
+- **CorefPrompt.predict_coref(event1, event2)**: suitable for processing multiple event pairs located in the same document. It is necessary to first initialize the corresponding document using the `CorefPrompt.init_document(doc)` function.
+- **CorefPrompt.predict_coref_in_doc(document, event1, event2)**: directly predict coreference between the event pair located in a document.
+
+```python
+# direct predict event pairs
+res = coref_model.predict_coref_in_doc(document, ev1, ev5)
+print(f"ev1[{ev1['trigger']}] - ev5[{ev5['trigger']}]: {res['label']} ({res['probability']})")
+```
+
+```
+ev1[suicide] - ev5[death]: coref (0.9997438788414001)
+```
+
+```python
+# predict event pairs in the same document
+coref_model.init_document(document)
+res = coref_model.predict_coref(ev1, ev5)
+print(f"ev1[{ev1['trigger']}] - ev5[{ev5['trigger']}]: {res['label']} ({res['probability']})")
+res = coref_model.predict_coref(ev1, ev3)
+print(f"ev1[{ev1['trigger']}] - ev3[{ev5['trigger']}]: {res['label']} ({res['probability']})")
+res = coref_model.predict_coref(ev1, ev4)
+print(f"ev1[{ev1['trigger']}] - ev4[{ev5['trigger']}]: {res['label']} ({res['probability']})")
+res = coref_model.predict_coref(ev3, ev4)
+print(f"ev3[{ev1['trigger']}] - ev4[{ev5['trigger']}]: {res['label']} ({res['probability']})")
+```
+
+```
+ev1[suicide] - ev5[death]: coref (0.9997438788414001)
+ev1[suicide] - ev3[death]: non-coref (0.9977204203605652)
+ev1[suicide] - ev4[death]: non-coref (0.9989845156669617)
+ev3[suicide] - ev4[death]: coref (0.999984622001648)
+```
+
+You can modify the [demo.py]() file to try it out!
+
+## Training & Evaluation on the KBP corpus
+
+### Preparation
 
 #### Download the evaluation script
 
@@ -20,16 +146,6 @@ Run (from inside the repo):
 cd ./
 git clone git@github.com:conll/reference-coreference-scorers.git
 ```
-
-#### Download pretrained models
-
-Download the pretrained model weights (e.g. `bert-large-cased`) from Huggingface [Model Hub](https://huggingface.co/models):
-
-```bash
-bash download_pt_models.sh
-```
-
-**Note:** this script will download all pretrained models used in our experiment in `./PT_MODELS/`.
 
 #### Prepare the dataset
 
@@ -83,11 +199,11 @@ Then,
    python3 convert.py --kbp_data_dir $DATA_DIR --sent_data_dir $SENT_DIR
    ```
 
-   **Note:** this script will create `train.json`、`dev.json` and `test.json` in the *data* folder, as well as `train_filtered.json`、`dev_filtered.json` and `test_filtered.json` which filter same position and overlapping event mentions.
+   **Note:** this script will create `train.json`、`dev.json` and `test.json` in the *data* folder, as well as `train_filtered.json`、`dev_filtered.json` and `test_filtered.json` which filter same or overlapping event mentions.
 
 3. Use the [trigger detector](https://github.com/jsksxs360/event-coref-emnlp2022#download-final-model) provided by [Xu et al., (2022)](https://aclanthology.org/2022.emnlp-main.454/) to extract event triggers in the test set, and store the results in the `./data/epoch_3_test_pred_events.json` file.
 
-4. Install the [OmniEvent](https://github.com/THU-KEG/OmniEvent) tool via `pip install OmniEvent`, and then recognize event arguments using:
+4. Install the [OmniEvent](https://github.com/THU-KEG/OmniEvent) tool via `pip install OmniEvent`, download model weights, and then recognize event arguments using:
 
    ```bash
    cd data/KnowledgeExtraction/
@@ -97,7 +213,7 @@ Then,
 
    **Note:** this script will create `xxx_pred_args.json` files in the *data/KnowledgeExtraction/argument_files* folder.
 
-## Undersampling
+### Undersampling
 
 To reduce the computational cost, we apply undersampling on the training set based on the event similarities.
 
@@ -139,7 +255,7 @@ python3 related_info_extraction.py
 
 This will create `xxx_related_info_{cosine_threshold}.json` files in the *data/KnowledgeExtraction/simi_files* folder, which contain the arguments of each event and the related event information with high similarity.
 
-## Event Coreference Resolution
+### Event Coreference Resolution
 
 #### Training
 
@@ -148,11 +264,12 @@ Train our prompt-based model CorefPrompt using (Run with `--do_train`):
 ```
 cd src/coref_prompt/
 
-export OUTPUT_DIR=./roberta_m_hta_hn_512_product_cosine_results/
+export OUTPUT_DIR=./roberta_m_hta_hn_512_with_mask_product_cosine_results/
 
 python3 run_mix_prompt.py \
     --output_dir=$OUTPUT_DIR \
     --prompt_type=m_hta_hn \
+    --with_mask \
     --select_arg_strategy=no_filter \
     --matching_style=product_cosine \
     --cosine_space_dim=64 \
@@ -199,7 +316,11 @@ python3 run_cluster.py \
     --do_evaluate
 ```
 
-## Results
+### Results
+
+You can download the final **Event Similarity Scorer** & **CorefPrompt (event coreference model)** weights at:
+
+[https://drive.google.com/drive/folders/1XoJBHIEaCbH8bf0Sdd9vJVqNRS6r9SUV?usp=share_link](https://drive.google.com/drive/folders/1XoJBHIEaCbH8bf0Sdd9vJVqNRS6r9SUV?usp=share_link)
 
 | Model                                                        | MUC  | B3   | CEA  | BLA  | AVG  |
 | ------------------------------------------------------------ | ---- | ---- | ---- | ---- | ---- |
@@ -208,3 +329,7 @@ python3 run_cluster.py \
 | [(Lu & Ng, 2021)](https://aclanthology.org/2021.emnlp-main.103/) | 45.2 | 54.7 | 53.8 | 38.2 | 48.0 |
 | [(Xu et al., 2022)](https://aclanthology.org/2022.emnlp-main.454/) | 46.2 | 57.4 | 59.0 | 42.0 | 51.2 |
 | CorefPrompt                                                  | 45.3 | 57.5 | 59.9 | 42.3 | 51.3 |
+
+## Contact info
+
+Contact [Sheng Xu](https://github.com/jsksxs360) at *[sxu@stu.suda.edu.cn](mailto:sxu@stu.suda.edu.cn)* for questions about this repository.
