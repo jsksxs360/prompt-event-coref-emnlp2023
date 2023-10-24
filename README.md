@@ -31,9 +31,9 @@ bash download_pt_models.sh
 
 ## How to use
 
-It is easy to use our model to predict event coreferences. For example, consider the following text, which contains seven event mentions ($ev_1$-$ev\_7$) and ten entity mentions ($arg_1$-$arg_{10}$) that serve as arguments. 
+It is easy to use our model to predict event coreferences. For example, consider the following text, which contains seven event mentions (ev1-ev7) and ten entity mentions (arg1-arg10) that serve as arguments. 
 
-$\{$Former Pakistani dancing girl$\}arg\_1$ commits $\{$suicide$\}ev\_1$ 12 years after horrific $\{$acid$\}arg\_2$ $\{$attack$\}ev\_2$ which $\{$left$\} ev\_3$ $\{$her$\} arg\_3$ looking "not human". $\{$She$\} arg\_4$ had undergone 39 separate surgeries to repair $\{$damage$\} ev\_4$. Leapt to $\{$her$\} arg\_5$ $\{$death$\} ev\_5$ from $\{$sixth floor Rome building$\} arg_6$ $\{$earlier this month$\} arg\_7$. $\{$Her ex-husband$\} arg\_8$ was $\{$charged$\} ev\_6$ with $\{$attempted murder$\} arg\_9$ in $\{$2002$\} arg_{10}$ but has since been $\{$acquitted$\} ev\_7$.
+![example](example.jpg)
 
 Among them, 
 
