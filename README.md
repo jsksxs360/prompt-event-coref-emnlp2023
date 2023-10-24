@@ -333,3 +333,15 @@ You can download the final **Event Similarity Scorer** & **CorefPrompt (event co
 ## Contact info
 
 Contact [Sheng Xu](https://github.com/jsksxs360) at *[sxu@stu.suda.edu.cn](mailto:sxu@stu.suda.edu.cn)* for questions about this repository.
+
+```
+@misc{xu2023corefprompt,
+      title={CorefPrompt: Prompt-based Event Coreference Resolution by Measuring Event Type and Argument Compatibilities}, 
+      author={Sheng Xu and Peifeng Li and Qiaoming Zhu},
+      year={2023},
+      eprint={2310.14512},
+      archivePrefix={arXiv},
+      primaryClass={cs.CL}
+}
+```
+
