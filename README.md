@@ -2,14 +2,14 @@
 
 This code was used in the paper:
 
-"[CorefPrompt: Prompt-based Event Coreference Resolution by Measuring Event Type and Argument Compatibilities](https://arxiv.org/abs/2310.14512)"
+"[CorefPrompt: Prompt-based Event Coreference Resolution by Measuring Event Type and Argument Compatibilities](https://arxiv.org/abs/2310.14512)"  
 Sheng Xu, Peifeng Li and Qiaoming Zhu. EMNLP 2023.
 
 A simple prompt-based model implemented in PyTorch for resolving within-document event coreference. The model was trained and evaluated on the KBP corpus.
 
 ![main](CorefPrompt.jpg)
 
-We first utilize a prefix template $\mathcal{T}_{pre}$ to inform PTM what to focus on when encoding, then mark event types and arguments by inserting anchor templates $\mathcal{T}_{anc}$ around event mentions, and finally demonstrate the reasoning process of ECR using an inference template $\mathcal{T}_{inf}$ which introduces two auxiliary prompt tasks, event-type compatibility and argument compatibility.
+We first utilize a prefix template $\mathcal{T}\_{pre}$ to inform PTM what to focus on when encoding, then mark event types and arguments by inserting anchor templates $\mathcal{T}\_{anc}$ around event mentions, and finally demonstrate the reasoning process of ECR using an inference template $\mathcal{T}\_{inf}$ which introduces two auxiliary prompt tasks, event-type compatibility and argument compatibility.
 
 ## Set up
 
@@ -31,9 +31,9 @@ bash download_pt_models.sh
 
 ## How to use
 
-It is easy to use our model to predict event coreferences. For example, consider the following text, which contains seven event mentions ($ev_1$-$ev_7$) and ten entity mentions ($arg_1$-$arg_{10}$) that serve as arguments. 
+It is easy to use our model to predict event coreferences. For example, consider the following text, which contains seven event mentions ($ev_1$-$ev\_7$) and ten entity mentions ($arg_1$-$arg_{10}$) that serve as arguments. 
 
-$\{$Former Pakistani dancing girl$\}arg_1$ commits $\{$suicide$\}ev_1$ 12 years after horrific $\{$acid$\}arg_2$ $\{$attack$\}ev_2$ which $\{$left$\} ev_3$ $\{$her$\} arg_3$ looking "not human". $\{$She$\} arg_4$ had undergone 39 separate surgeries to repair $\{$damage$\} ev_4$. Leapt to $\{$her$\} arg_5$ $\{$death$\} ev_5$ from $\{$sixth floor Rome building$\} arg_6$ $\{$earlier this month$\} arg_7$. $\{$Her ex-husband$\} arg_8$ was $\{$charged$\} ev_6$ with $\{$attempted murder$\} arg_9$ in $\{$2002$\} arg_{10}$ but has since been $\{$acquitted$\} ev_7$.
+$\{$Former Pakistani dancing girl$\}arg\_1$ commits $\{$suicide$\}ev\_1$ 12 years after horrific $\{$acid$\}arg\_2$ $\{$attack$\}ev\_2$ which $\{$left$\} ev\_3$ $\{$her$\} arg\_3$ looking "not human". $\{$She$\} arg\_4$ had undergone 39 separate surgeries to repair $\{$damage$\} ev\_4$. Leapt to $\{$her$\} arg\_5$ $\{$death$\} ev\_5$ from $\{$sixth floor Rome building$\} arg_6$ $\{$earlier this month$\} arg\_7$. $\{$Her ex-husband$\} arg\_8$ was $\{$charged$\} ev\_6$ with $\{$attempted murder$\} arg\_9$ in $\{$2002$\} arg_{10}$ but has since been $\{$acquitted$\} ev\_7$.
 
 Among them, 
 
@@ -130,7 +130,7 @@ ev1[suicide] - ev4[death]: non-coref (0.9989845156669617)
 ev3[suicide] - ev4[death]: coref (0.999984622001648)
 ```
 
-You can modify the [demo.py]() file to try it out!
+You can modify the [demo.py](https://github.com/jsksxs360/prompt-event-coref-emnlp2023/blob/main/src/demo.py) file to try it out!
 
 ## Training & Evaluation on the KBP corpus
 
