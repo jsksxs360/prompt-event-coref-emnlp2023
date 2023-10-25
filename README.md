@@ -1,19 +1,19 @@
-# CorefPrompt: Prompt-based Event Coreference Resolver
+# CorefPrompt: A Prompt-based Event Coreference Resolver
 
 This code was used in the paper:
 
 "[CorefPrompt: Prompt-based Event Coreference Resolution by Measuring Event Type and Argument Compatibilities](https://arxiv.org/abs/2310.14512)"  
 Sheng Xu, Peifeng Li and Qiaoming Zhu. EMNLP 2023.
 
-A simple prompt-based model implemented in PyTorch for resolving within-document event coreference. The model was trained and evaluated on the KBP corpus.
+A simple prompt-based model for predicting event pair coreferences. The model was trained and evaluated on the KBP corpus.
 
 ![main](CorefPrompt.jpg)
 
-We first utilize a prefix template $\mathcal{T}\_{pre}$ to inform PTM what to focus on when encoding, then mark event types and arguments by inserting anchor templates $\mathcal{T}\_{anc}$ around event mentions, and finally demonstrate the reasoning process of ECR using an inference template $\mathcal{T}\_{inf}$ which introduces two auxiliary prompt tasks, event-type compatibility and argument compatibility.
+It first utilizes a prefix template $\mathcal{T}\_{pre}$ to inform the pre-trained model what to focus on when encoding, then marks event types and arguments by inserting anchor templates $\mathcal{T}\_{anc}$ around event mentions, and finally demonstrates the reasoning process of coreference prediction using an inference template $\mathcal{T}\_{inf}$ which introduces two auxiliary prompt tasks, event-type compatibility and argument compatibility.
 
 ## Set up
 
-Set up a Python virtual environment and install packages using the `requirements` file:
+Set up a Python virtual environment and install packages using the *requirements* file:
 
 ```bash
 conda create -n corefprompt python=3.9
@@ -35,9 +35,7 @@ Among them,
 - the injury event mention $ev_3$ with the arguments $arg_2$ and $arg_3$ and the injury event $ev_4$ with the argument $arg_4$ are coreferential, as both of them describe the girl's disfigurement; 
 - other event mentions are singletons.
 
-Let's apply our CorefPrompt to predict the coreference of events $ev_{1},ev_3,ev_4$ and $ev_{5}$. 
-
-**Note:** For event arguments, we only care about participants and locations.
+Let's apply our CorefPrompt to predict the coreferences among these events. Note that For event arguments, we only care about participants and locations.
 
 ```python
 document = 'Former Pakistani dancing girl commits suicide 12 years after horrific acid attack which left her looking "not human". She had undergone 39 separate surgeries to repair damage. Leapt to her death from sixth floor Rome building earlier this month. Her ex-husband was charged with attempted murder in 2002 but has since been acquitted.'
@@ -74,7 +72,7 @@ ev5 = {
 }
 ```
 
-First, you need to create a CorefPrompt model by loading our provided checkpoint *coref-prompt-large* (can be downloaded from [Google Drive](https://drive.google.com/drive/folders/1XoJBHIEaCbH8bf0Sdd9vJVqNRS6r9SUV?usp=share_link)):
+First, we need to create a CorefPrompt model by loading our provided checkpoint *coref-prompt-large* (can be downloaded from [Google Drive](https://drive.google.com/drive/folders/1XoJBHIEaCbH8bf0Sdd9vJVqNRS6r9SUV?usp=share_link)):
 
 ```python
 from corefprompt import CorefPrompt
