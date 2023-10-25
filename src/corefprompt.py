@@ -1,36 +1,20 @@
 import os
-from collections import namedtuple
 import numpy as np
 import torch
 from torch import nn
-from torch.nn import CrossEntropyLoss
 from transformers import AutoConfig, AutoTokenizer
 from transformers import RobertaPreTrainedModel, RobertaModel
 from transformers.activations import gelu
 from allennlp.modules.span_extractors import SelfAttentiveSpanExtractor
-from coref_prompt.prompt import EVENT_SUBTYPES, id2subtype
-from coref_prompt.prompt import create_mix_template, create_event_context, create_verbalizer, get_special_tokens
 
-args = namedtuple('args', [
-    'model_type'
-    'model_checkpoint'
-    'best_weights'
-    'matching_style', 
-    'device', 
-    'prompt_type', 
-    'cosine_space_dim', 
-    'cosine_slices', 
-    'cosine_factor'
-])
-args.model_type = 'roberta'
-args.model_checkpoint=''
-args.best_weights=''
-args.matching_style = 'product_cosine'
-args.device = 'cuda' if torch.cuda.is_available() else 'cpu'
-args.prompt_type = 'm_hta_hn'
-args.cosine_space_dim = 64
-args.cosine_slices = 128
-args.cosine_factor = 4
+EVENT_SUBTYPES = [ # 18 subtypes
+    'artifact', 'transferownership', 'transaction', 'broadcast', 'contact', 'demonstrate', \
+    'injure', 'transfermoney', 'transportartifact', 'attack', 'meet', 'elect', \
+    'endposition', 'correspondence', 'arrestjail', 'startposition', 'transportperson', 'die'
+]
+id2subtype = {idx: c for idx, c in enumerate(EVENT_SUBTYPES, start=1)}
+id2subtype[0] = 'other'
+subtype2id = {v: k for k, v in id2subtype.items()}
 
 class RobertaLMHead(nn.Module):
     def __init__(self, config):
@@ -88,46 +72,19 @@ def multi_perspective_cosine(cosine_ffnn, cosine_mat_p, cosine_mat_q, batch_even
     return torch.sum(batch_event_1_reps * batch_event_2_reps, dim=-1)
 
 class RobertaForMixPrompt(RobertaPreTrainedModel):
-    def __init__(self, config, args):
+    def __init__(self, config):
         super().__init__(config)
         self.roberta = RobertaModel(config, add_pooling_layer=False)
         self.lm_head = RobertaLMHead(config)
         self.hidden_size = config.hidden_size
-        self.matching_style = args.matching_style
-        self.use_device = args.device
-        self.remove_match = (args.prompt_type == 'ma_remove-match')
-        self.remove_subtype_match = (args.prompt_type == 'ma_remove-subtype-match')
-        self.remove_arg_match = (args.prompt_type == 'ma_remove-arg-match')
-        if self.matching_style != 'none':
-            self.span_extractor = SelfAttentiveSpanExtractor(input_dim=self.hidden_size)
-            if self.matching_style == 'product':
-                self.coref_mapping = nn.Linear(2 * self.hidden_size, self.hidden_size)
-                if not self.remove_match:
-                    if not self.remove_subtype_match:
-                        self.type_match_mapping = nn.Linear(2 * self.hidden_size, self.hidden_size)
-                    if not self.remove_arg_match:
-                        self.arg_match_mapping = nn.Linear(2 * self.hidden_size, self.hidden_size)
-            else:
-                self.cosine_space_dim, self.cosine_slices, self.tensor_factor = (
-                    args.cosine_space_dim, args.cosine_slices, args.cosine_factor
-                )
-                self.cosine_ffnn = nn.Linear(self.hidden_size, self.cosine_space_dim)
-                self.cosine_mat_p = nn.Parameter(torch.rand((self.tensor_factor, self.cosine_slices), requires_grad=True))
-                self.cosine_mat_q = nn.Parameter(torch.rand((self.tensor_factor, self.cosine_space_dim), requires_grad=True))
-                if self.matching_style == 'cosine':
-                    self.coref_mapping = nn.Linear(self.hidden_size + self.cosine_slices, self.hidden_size)
-                    if not self.remove_match:
-                        if not self.remove_subtype_match:
-                            self.type_match_mapping = nn.Linear(self.hidden_size + self.cosine_slices, self.hidden_size)
-                        if not self.remove_arg_match:
-                            self.arg_match_mapping = nn.Linear(self.hidden_size + self.cosine_slices, self.hidden_size)
-                elif self.matching_style == 'product_cosine':
-                    self.coref_mapping = nn.Linear(2 * self.hidden_size + self.cosine_slices, self.hidden_size)
-                    if not self.remove_match:
-                        if not self.remove_subtype_match:
-                            self.type_match_mapping = nn.Linear(2 * self.hidden_size + self.cosine_slices, self.hidden_size)
-                        if not self.remove_arg_match:
-                            self.arg_match_mapping = nn.Linear(2 * self.hidden_size + self.cosine_slices, self.hidden_size)
+        self.use_device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        self.span_extractor = SelfAttentiveSpanExtractor(input_dim=self.hidden_size)
+        self.cosine_ffnn = nn.Linear(self.hidden_size, 64)
+        self.cosine_mat_p = nn.Parameter(torch.rand((4, 128), requires_grad=True))
+        self.cosine_mat_q = nn.Parameter(torch.rand((4, 64), requires_grad=True))
+        self.coref_mapping = nn.Linear(2 * self.hidden_size + 128, self.hidden_size)
+        self.type_match_mapping = nn.Linear(2 * self.hidden_size + 128, self.hidden_size)
+        self.arg_match_mapping = nn.Linear(2 * self.hidden_size + 128, self.hidden_size)
         self.update_keys_to_ignore(config, ["lm_head.decoder.weight"])
         self.post_init()
     
@@ -138,129 +95,33 @@ class RobertaForMixPrompt(RobertaPreTrainedModel):
         self.lm_head.decoder = new_embeddings
     
     def _matching_func(self, batch_event_1_reps, batch_event_2_reps):
-        if self.matching_style == 'product':
-            batch_e1_e2_match = batch_event_1_reps * batch_event_2_reps
-        elif self.matching_style == 'cosine':
-            batch_e1_e2_match = multi_perspective_cosine(
-                self.cosine_ffnn, self.cosine_mat_p, self.cosine_mat_q, 
-                batch_event_1_reps, batch_event_2_reps
-            )
-        elif self.matching_style == 'product_cosine':
-            batch_e1_e2_product = batch_event_1_reps * batch_event_2_reps
-            batch_multi_cosine = multi_perspective_cosine(
-                self.cosine_ffnn, self.cosine_mat_p, self.cosine_mat_q, 
-                batch_event_1_reps, batch_event_2_reps
-            )
-            batch_e1_e2_match = torch.cat([batch_e1_e2_product, batch_multi_cosine], dim=-1)
+        batch_e1_e2_product = batch_event_1_reps * batch_event_2_reps
+        batch_multi_cosine = multi_perspective_cosine(
+            self.cosine_ffnn, self.cosine_mat_p, self.cosine_mat_q, 
+            batch_event_1_reps, batch_event_2_reps
+        )
+        batch_e1_e2_match = torch.cat([batch_e1_e2_product, batch_multi_cosine], dim=-1)
         return batch_e1_e2_match
 
-    def forward(self, 
-        batch_inputs, batch_mask_idx, 
-        batch_event_idx, batch_t1_mask_idx, batch_t2_mask_idx, 
-        label_word_id, subtype_label_word_id, match_label_word_id=None, 
-        batch_mask_inputs=None, batch_type_match_mask_idx=None, batch_arg_match_mask_idx=None, 
-        labels=None, subtype_match_labels=None, arg_match_labels=None, e1_subtype_labels=None, e2_subtype_labels=None
-        ):
+    def forward(self, batch_inputs, batch_mask_idx, batch_event_idx, label_word_id):
         outputs = self.roberta(**batch_inputs)
         sequence_output = outputs.last_hidden_state
         batch_mask_reps = batched_index_select(sequence_output, 1, batch_mask_idx.unsqueeze(-1)).squeeze(1)
-        if not self.remove_match:
-            if not self.remove_subtype_match:
-                batch_type_match_mask_reps = batched_index_select(sequence_output, 1, batch_type_match_mask_idx.unsqueeze(-1)).squeeze(1)
-            if not self.remove_arg_match:
-                batch_arg_match_mask_reps = batched_index_select(sequence_output, 1, batch_arg_match_mask_idx.unsqueeze(-1)).squeeze(1)
-        batch_t1_mask_reps = batched_index_select(sequence_output, 1, batch_t1_mask_idx.unsqueeze(-1)).squeeze(1)
-        batch_t2_mask_reps = batched_index_select(sequence_output, 1, batch_t2_mask_idx.unsqueeze(-1)).squeeze(1)
-        if batch_mask_inputs is not None:
-            mask_outputs = self.roberta(**batch_mask_inputs)
-            mask_sequence_output = mask_outputs.last_hidden_state
-            batch_mask_mask_reps = batched_index_select(mask_sequence_output, 1, batch_mask_idx.unsqueeze(-1)).squeeze(1)
-            if not self.remove_match:
-                if not self.remove_subtype_match:
-                    batch_mask_type_match_mask_reps = batched_index_select(mask_sequence_output, 1, batch_type_match_mask_idx.unsqueeze(-1)).squeeze(1)
-                if not self.remove_arg_match:
-                    batch_mask_arg_match_mask_reps = batched_index_select(mask_sequence_output, 1, batch_arg_match_mask_idx.unsqueeze(-1)).squeeze(1)
-            batch_mask_t1_mask_reps = batched_index_select(mask_sequence_output, 1, batch_t1_mask_idx.unsqueeze(-1)).squeeze(1)
-            batch_mask_t2_mask_reps = batched_index_select(mask_sequence_output, 1, batch_t2_mask_idx.unsqueeze(-1)).squeeze(1)
-        if self.matching_style != 'none':
-            # extract events & matching
-            batch_e1_idx, batch_e2_idx = [], []
-            for e1s, e1e, e2s, e2e in batch_event_idx:
-                batch_e1_idx.append([[e1s, e1e]])
-                batch_e2_idx.append([[e2s, e2e]])
-            batch_e1_idx, batch_e2_idx = (
-                torch.tensor(batch_e1_idx).to(self.use_device), 
-                torch.tensor(batch_e2_idx).to(self.use_device)
-            )
-            batch_event_1_reps = self.span_extractor(sequence_output, batch_e1_idx).squeeze(dim=1)
-            batch_event_2_reps = self.span_extractor(sequence_output, batch_e2_idx).squeeze(dim=1)
-            batch_match_reps = self._matching_func(batch_event_1_reps, batch_event_2_reps)
-            batch_mask_reps = self.coref_mapping(torch.cat([batch_mask_reps, batch_match_reps], dim=-1))
-            if not self.remove_match:
-                if not self.remove_arg_match:
-                    batch_arg_match_mask_reps = self.arg_match_mapping(torch.cat([batch_arg_match_mask_reps, batch_match_reps], dim=-1))
-                if not self.remove_subtype_match:
-                    batch_subtype_match_reps = self._matching_func(batch_t1_mask_reps, batch_t2_mask_reps)
-                    batch_type_match_mask_reps = self.type_match_mapping(torch.cat([batch_type_match_mask_reps, batch_subtype_match_reps], dim=-1))
-            if batch_mask_inputs is not None:
-                batch_mask_event_1_reps = self.span_extractor(mask_sequence_output, batch_e1_idx).squeeze(dim=1)
-                batch_mask_event_2_reps = self.span_extractor(mask_sequence_output, batch_e2_idx).squeeze(dim=1)
-                batch_mask_match_reps = self._matching_func(batch_mask_event_1_reps, batch_mask_event_2_reps)
-                batch_mask_mask_reps = self.coref_mapping(torch.cat([batch_mask_mask_reps, batch_mask_match_reps], dim=-1))
-                if not self.remove_match:
-                    if not self.remove_arg_match:
-                        batch_mask_arg_match_mask_reps = self.arg_match_mapping(torch.cat([batch_mask_arg_match_mask_reps, batch_mask_match_reps], dim=-1))
-                    if not self.remove_subtype_match:
-                        batch_mask_subtype_match_reps = self._matching_func(batch_mask_t1_mask_reps, batch_mask_t2_mask_reps)
-                        batch_mask_type_match_mask_reps = self.type_match_mapping(torch.cat([batch_mask_type_match_mask_reps, batch_mask_subtype_match_reps], dim=-1))
+        # extract events & matching
+        batch_e1_idx, batch_e2_idx = [], []
+        for e1s, e1e, e2s, e2e in batch_event_idx:
+            batch_e1_idx.append([[e1s, e1e]])
+            batch_e2_idx.append([[e2s, e2e]])
+        batch_e1_idx, batch_e2_idx = (
+            torch.tensor(batch_e1_idx).to(self.use_device), 
+            torch.tensor(batch_e2_idx).to(self.use_device)
+        )
+        batch_event_1_reps = self.span_extractor(sequence_output, batch_e1_idx).squeeze(dim=1)
+        batch_event_2_reps = self.span_extractor(sequence_output, batch_e2_idx).squeeze(dim=1)
+        batch_match_reps = self._matching_func(batch_event_1_reps, batch_event_2_reps)
+        batch_mask_reps = self.coref_mapping(torch.cat([batch_mask_reps, batch_match_reps], dim=-1))
         coref_logits = self.lm_head(batch_mask_reps)[:, label_word_id]
-        if not self.remove_match:
-            if not self.remove_subtype_match:
-                type_match_logits = self.lm_head(batch_type_match_mask_reps)[:, match_label_word_id]
-            if not self.remove_arg_match:
-                arg_match_logits = self.lm_head(batch_arg_match_mask_reps)[:, match_label_word_id]
-        e1_type_logits = self.lm_head(batch_t1_mask_reps)[:, subtype_label_word_id]
-        e2_type_logits = self.lm_head(batch_t2_mask_reps)[:, subtype_label_word_id]
-        if batch_mask_inputs is not None:
-            mask_coref_logits = self.lm_head(batch_mask_mask_reps)[:, label_word_id]
-            if not self.remove_match:
-                if not self.remove_subtype_match:
-                    mask_type_match_logits = self.lm_head(batch_mask_type_match_mask_reps)[:, match_label_word_id]
-                if not self.remove_arg_match:
-                    mask_arg_match_logits = self.lm_head(batch_mask_arg_match_mask_reps)[:, match_label_word_id]
-            mask_e1_type_logits = self.lm_head(batch_mask_t1_mask_reps)[:, subtype_label_word_id]
-            mask_e2_type_logits = self.lm_head(batch_mask_t2_mask_reps)[:, subtype_label_word_id]
-
-        loss = None
-        if labels is not None:
-            loss_fct = CrossEntropyLoss()
-            coref_loss = loss_fct(coref_logits, labels)
-            subtype_loss = 0.5 * loss_fct(e1_type_logits, e1_subtype_labels) + 0.5 * loss_fct(e2_type_logits, e2_subtype_labels)
-            if not self.remove_match:
-                if self.remove_subtype_match:
-                    match_loss = loss_fct(arg_match_logits, arg_match_labels)
-                elif self.remove_arg_match:
-                    match_loss = loss_fct(type_match_logits, subtype_match_labels)
-                else:
-                    match_loss = 0.5 * loss_fct(type_match_logits, subtype_match_labels) + 0.5 * loss_fct(arg_match_logits, arg_match_labels)
-                loss = torch.log(1 + coref_loss) + torch.log(1 + match_loss) + torch.log(1 + subtype_loss)
-            else:
-                loss = torch.log(1 + coref_loss) + torch.log(1 + subtype_loss)
-            if batch_mask_inputs is not None:
-                mask_coref_loss = loss_fct(mask_coref_logits, labels)
-                mask_subtype_loss = 0.5 * loss_fct(mask_e1_type_logits, e1_subtype_labels) + 0.5 * loss_fct(mask_e2_type_logits, e2_subtype_labels)
-                if not self.remove_match:
-                    if self.remove_subtype_match:
-                        mask_match_loss = loss_fct(mask_arg_match_logits, arg_match_labels)
-                    elif self.remove_arg_match:
-                        mask_match_loss = loss_fct(mask_type_match_logits, subtype_match_labels)
-                    else:
-                        mask_match_loss = 0.5 * loss_fct(mask_type_match_logits, subtype_match_labels) + 0.5 * loss_fct(mask_arg_match_logits, arg_match_labels)
-                    mask_loss = torch.log(1 + mask_coref_loss) + torch.log(1 + mask_match_loss) + torch.log(1 + mask_subtype_loss)
-                else:
-                    mask_loss = torch.log(1 + mask_coref_loss) + torch.log(1 + mask_subtype_loss)
-                loss = 0.5 * loss + 0.5 * mask_loss
-        return loss, coref_logits
+        return coref_logits
 
 def findall(p, s):
     '''yields all the positions of p in s.'''
@@ -319,40 +180,64 @@ def to_device(device, batch_data):
     return new_batch_data
 
 class CorefPrompt():
-    def __init__(self, model_checkpoint, best_weights, args) -> None:
-        self.model = self._init_model(model_checkpoint, args)
-        self.device = args.device
-        self.tokenizer = self._init_tokenizer(model_checkpoint, args.model_type)
-        self.verbalizer = self._init_verbalizer(args.model_type, args.prompt_type)
-        # load best weights
-        self.model.load_state_dict(
-            torch.load(os.path.join(best_weights), map_location=torch.device(self.device))
-        )
+    def __init__(self, model_checkpoint, best_weights) -> None:
+        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        self.model = self._init_model(model_checkpoint)
+        self.tokenizer = self._init_tokenizer(model_checkpoint)
+        self.verbalizer = self._init_verbalizer()
+        self.model.load_state_dict(torch.load(os.path.join(best_weights), map_location=torch.device(self.device)))
         self.special_token_dict = self._init_special_token_dict()
+        self.document = ''
+        self.sentences = ''
+        self.sentences_lengths = []
     
-    def _init_model(self, model_checkpoint, args):
+    def _init_model(self, model_checkpoint):
         config = AutoConfig.from_pretrained(model_checkpoint)
         model = RobertaForMixPrompt.from_pretrained(
             model_checkpoint,
-            config=config, 
-            args=args
-        ).to(args.device)
+            config=config
+        ).to(self.device)
         return model
 
-    def _init_tokenizer(self, model_checkpoint, model_type):
+    def _init_tokenizer(self, model_checkpoint):
         tokenizer = AutoTokenizer.from_pretrained(model_checkpoint)
         # add special tokens
-        sp_tokens = (
-            get_special_tokens(model_type, 'base') + 
-            get_special_tokens(model_type, 'match') + 
-            get_special_tokens(model_type, 'event_subtype')
-        )
+        sp_tokens = [
+            '<e1_start>', '<e1_end>', '<e2_start>', '<e2_end>', 
+            '<l1>', '<l2>', '<l3>', '<l4>', '<l5>', '<l6>', '<l7>', '<l8>', '<l9>', '<l10>', 
+            '<match>', '<mismatch>'
+        ] + [f'<st_{i}>' for i in range(len(EVENT_SUBTYPES) + 1)]
         tokenizer.add_special_tokens({'additional_special_tokens': sp_tokens})
         self.model.resize_token_embeddings(len(tokenizer))
         return tokenizer
 
-    def _init_verbalizer(self, model_type, prompt_type):
-        verbalizer = create_verbalizer(self.tokenizer, model_type, prompt_type)
+    def _create_verbalizer(self):
+        base_verbalizer = {
+            'coref': {
+                'token': 'same', 'id': self.tokenizer.convert_tokens_to_ids('same')
+            } , 
+            'non-coref': {
+                'token': 'different', 'id': self.tokenizer.convert_tokens_to_ids('different')
+            }, 
+            'match': {
+                'token': '<match>', 'id': self.tokenizer.convert_tokens_to_ids('<match>'), 
+                'description': 'same related relevant similar matching matched'
+            }, 
+            'mismatch': {
+                'token': '<mismatch>', 'id': self.tokenizer.convert_tokens_to_ids('<mismatch>'), 
+                'description': 'different unrelated irrelevant dissimilar mismatched'
+            }
+        }
+        for subtype, s_id in subtype2id.items():
+            base_verbalizer[subtype] = {
+                'token': f'<st_{s_id}>', 
+                'id': self.tokenizer.convert_tokens_to_ids(f'<st_{s_id}>'), 
+                'description': subtype if subtype != 'other' else 'normal'
+            }
+        return base_verbalizer
+
+    def _init_verbalizer(self):
+        verbalizer = self._create_verbalizer()
         # initialize embeddings for 'match' and 'mismatch' token
         subtype_sp_token_num = len(EVENT_SUBTYPES) + 1
         match_idx, mismatch_idx = -(subtype_sp_token_num+2), -(subtype_sp_token_num+1)
@@ -406,14 +291,221 @@ class CorefPrompt():
         if places:
             arg_str += f" at {', '.join([arg['mention'] for arg in places])}"
         return arg_str.strip()
+
+    def _create_mix_template(self, e1_trigger:str, e2_trigger:str, e1_arg_str: str, e2_arg_str: str) -> dict:
+        # prefix template
+        prefix_trigger_offsets = []
+        prefix_template = f"In the following text, the focus is on the events expressed by {self.special_token_dict['e1s']} "
+        prefix_trigger_offsets.append([len(prefix_template), len(prefix_template) + len(e1_trigger) - 1])
+        prefix_template += f"{e1_trigger} {self.special_token_dict['e1e']} and {self.special_token_dict['e2s']} "
+        prefix_trigger_offsets.append([len(prefix_template), len(prefix_template) + len(e2_trigger) - 1])
+        prefix_template += f"{e2_trigger} {self.special_token_dict['e2e']}, and it needs to judge whether they refer to the same or different events: "
+        # anchor template
+        e1_anchor_temp = "Here "
+        e1s_anchor_offset = len(e1_anchor_temp)
+        e1_anchor_temp += f"{self.special_token_dict['e1s']} {e1_trigger} "
+        e1e_anchor_offset = len(e1_anchor_temp)
+        e1_anchor_temp += f"{self.special_token_dict['e1e']} expresses a {self.special_token_dict['mask']} event"
+        e2_anchor_temp = "Here "
+        e2s_anchor_offset = len(e2_anchor_temp)
+        e2_anchor_temp += f"{self.special_token_dict['e2s']} {e2_trigger} "
+        e2e_anchor_offset = len(e2_anchor_temp)
+        e2_anchor_temp += f"{self.special_token_dict['e2e']} expresses a {self.special_token_dict['mask']} event" 
+        e1_anchor_temp += f"{' ' + e1_arg_str if e1_arg_str else ''}."
+        e2_anchor_temp += f"{' ' + e2_arg_str if e2_arg_str else ''}."
+        # inference template
+        infer_trigger_offsets = []
+        infer_template = f"In conclusion, the events expressed by {self.special_token_dict['e1s']} "
+        infer_trigger_offsets.append([len(infer_template), len(infer_template) + len(e1_trigger) - 1])
+        infer_template += f"{e1_trigger} {self.special_token_dict['e1e']} and {self.special_token_dict['e2s']} "
+        infer_trigger_offsets.append([len(infer_template), len(infer_template) + len(e2_trigger) - 1])
+        infer_template += f"{e2_trigger} {self.special_token_dict['e2e']}"
+        infer_template += f" have {self.special_token_dict['mask']} event type and {self.special_token_dict['mask']} participants"
+        infer_template += f", so they refer to {self.special_token_dict['mask']} event."
+        return {
+            'prefix_template': prefix_template, 
+            'e1_anchor_template': e1_anchor_temp, 
+            'e2_anchor_template': e2_anchor_temp, 
+            'infer_template': infer_template, 
+            'prefix_trigger_offsets': prefix_trigger_offsets, 
+            'infer_trigger_offsets': infer_trigger_offsets, 
+            'e1s_anchor_offset': e1s_anchor_offset, 
+            'e1e_anchor_offset': e1e_anchor_offset, 
+            'e2s_anchor_offset': e2s_anchor_offset, 
+            'e2e_anchor_offset': e2e_anchor_offset, 
+        }
     
+    def _create_event_context(self, 
+        e1_sent_idx:int, e1_sent_start:int, e1_trigger:str,  
+        e2_sent_idx:int, e2_sent_start:int, e2_trigger:str, 
+        max_length:int
+        ) -> dict:
+        if e1_sent_idx == e2_sent_idx: # two events in the same sentence
+            assert e1_sent_start < e2_sent_start
+            e1_e2_sent = self.sentences[e1_sent_idx]['text']
+            core_context_before = f"{e1_e2_sent[:e1_sent_start]}"
+            core_context_after = f"{e1_e2_sent[e2_sent_start + len(e2_trigger):]}"
+            e1s_offset = 0
+            core_context_middle = f"{self.special_token_dict['e1s']} {e1_trigger} "
+            e1e_offset = len(core_context_middle)
+            core_context_middle += f"{self.special_token_dict['e1e']}{e1_e2_sent[e1_sent_start + len(e1_trigger):e2_sent_start]}"
+            e2s_offset = len(core_context_middle)
+            core_context_middle += f"{self.special_token_dict['e2s']} {e2_trigger} "
+            e2e_offset = len(core_context_middle)
+            core_context_middle += f"{self.special_token_dict['e2e']}"
+            # segment contain the two events
+            core_context = core_context_before + core_context_middle + core_context_after
+            total_length = len(self.tokenizer.tokenize(core_context))
+            before_context, after_context = '', ''
+            if total_length > max_length: # cut segment
+                before_after_length = (max_length - len(self.tokenizer.tokenize(core_context_middle))) // 2
+                core_context_before = self.tokenizer.decode(self.tokenizer.encode(core_context_before)[1:-1][-before_after_length:])
+                core_context_after = self.tokenizer.decode(self.tokenizer.encode(core_context_after)[1:-1][:before_after_length])
+                core_context = core_context_before + core_context_middle + core_context_after
+                e1s_offset, e1e_offset, e2s_offset, e2e_offset = np.asarray([e1s_offset, e1e_offset, e2s_offset, e2e_offset]) + np.full((4,), len(core_context_before))
+            else: # create contexts before/after the host sentence
+                e1s_offset, e1e_offset, e2s_offset, e2e_offset = np.asarray([e1s_offset, e1e_offset, e2s_offset, e2e_offset]) + np.full((4,), len(core_context_before))
+                e_before, e_after = e1_sent_idx - 1, e1_sent_idx + 1
+                while True:
+                    if e_before >= 0:
+                        if total_length + self.sentences_lengths[e_before] <= max_length:
+                            before_context = self.sentences[e_before]['text'] + ' ' + before_context
+                            total_length += 1 + self.sentences_lengths[e_before]
+                            e_before -= 1
+                        else:
+                            e_before = -1
+                    if e_after < len(self.sentences):
+                        if total_length + self.sentences_lengths[e_after] <= max_length:
+                            after_context += ' ' + self.sentences[e_after]['text']
+                            total_length += 1 + self.sentences_lengths[e_after]
+                            e_after += 1
+                        else:
+                            e_after = len(self.sentences)
+                    if e_before == -1 and e_after == len(self.sentences):
+                        break
+            tri1s_core_offset, tri1e_core_offset = e1s_offset + len(self.special_token_dict['e1s']) + 1, e1e_offset - 2
+            tri2s_core_offset, tri2e_core_offset = e2s_offset + len(self.special_token_dict['e2s']) + 1, e2e_offset - 2
+            assert core_context[e1s_offset:e1e_offset] == self.special_token_dict['e1s'] + ' ' + e1_trigger + ' '
+            assert core_context[e1e_offset:e1e_offset + len(self.special_token_dict['e1e'])] == self.special_token_dict['e1e']
+            assert core_context[e2s_offset:e2e_offset] == self.special_token_dict['e2s'] + ' ' + e2_trigger + ' '
+            assert core_context[e2e_offset:e2e_offset + len(self.special_token_dict['e2e'])] == self.special_token_dict['e2e']
+            assert core_context[tri1s_core_offset:tri1e_core_offset+1] == e1_trigger
+            assert core_context[tri2s_core_offset:tri2e_core_offset+1] == e2_trigger
+            return {
+                'type': 'same_sent', 
+                'core_context': core_context, 
+                'before_context': before_context, 
+                'after_context': after_context, 
+                'e1s_core_offset': e1s_offset, 
+                'e1e_core_offset': e1e_offset, 
+                'tri1s_core_offset': tri1s_core_offset, 
+                'tri1e_core_offset': tri1e_core_offset, 
+                'e2s_core_offset': e2s_offset, 
+                'e2e_core_offset': e2e_offset, 
+                'tri2s_core_offset': tri2s_core_offset, 
+                'tri2e_core_offset': tri2e_core_offset
+            }
+        else: # two events in different sentences
+            e1_sent, e2_sent = self.sentences[e1_sent_idx]['text'], self.sentences[e2_sent_idx]['text']
+            # e1 source sentence
+            e1_core_context_before = f"{e1_sent[:e1_sent_start]}"
+            e1_core_context_after = f"{e1_sent[e1_sent_start + len(e1_trigger):]}"
+            e1s_offset = 0
+            e1_core_context_middle = f"{self.special_token_dict['e1s']} {e1_trigger} "
+            e1e_offset = len(e1_core_context_middle)
+            e1_core_context_middle += f"{self.special_token_dict['e1e']}"
+            # e2 source sentence
+            e2_core_context_before = f"{e2_sent[:e2_sent_start]}"
+            e2_core_context_after = f"{e2_sent[e2_sent_start + len(e2_trigger):]}"
+            e2s_offset = 0
+            e2_core_context_middle = f"{self.special_token_dict['e2s']} {e2_trigger} "
+            e2e_offset = len(e2_core_context_middle)
+            e2_core_context_middle += f"{self.special_token_dict['e2e']}"
+            # segment contain the two events
+            e1_core_context = e1_core_context_before + e1_core_context_middle + e1_core_context_after
+            e2_core_context = e2_core_context_before + e2_core_context_middle + e2_core_context_after
+            total_length = len(self.tokenizer.tokenize(e1_core_context)) + len(self.tokenizer.tokenize(e2_core_context))
+            e1_before_context, e1_after_context, e2_before_context, e2_after_context = '', '', '', ''
+            if total_length > max_length:
+                e1_e2_middle_length = len(self.tokenizer.tokenize(e1_core_context_middle)) + len(self.tokenizer.tokenize(e2_core_context_middle))
+                before_after_length = (max_length - e1_e2_middle_length) // 4
+                e1_core_context_before = self.tokenizer.decode(self.tokenizer.encode(e1_core_context_before)[1:-1][-before_after_length:])
+                e1_core_context_after = self.tokenizer.decode(self.tokenizer.encode(e1_core_context_after)[1:-1][:before_after_length])
+                e1_core_context = e1_core_context_before + e1_core_context_middle + e1_core_context_after
+                e1s_offset, e1e_offset = np.asarray([e1s_offset, e1e_offset]) + np.full((2,), len(e1_core_context_before))
+                e2_core_context_before = self.tokenizer.decode(self.tokenizer.encode(e2_core_context_before)[1:-1][-before_after_length:])
+                e2_core_context_after = self.tokenizer.decode(self.tokenizer.encode(e2_core_context_after)[1:-1][:before_after_length])
+                e2_core_context = e2_core_context_before + e2_core_context_middle + e2_core_context_after
+                e2s_offset, e2e_offset = np.asarray([e2s_offset, e2e_offset]) + np.full((2,), len(e2_core_context_before))
+            else: # add other sentences
+                e1s_offset, e1e_offset = np.asarray([e1s_offset, e1e_offset]) + np.full((2,), len(e1_core_context_before))
+                e2s_offset, e2e_offset = np.asarray([e2s_offset, e2e_offset]) + np.full((2,), len(e2_core_context_before))
+                e1_before, e1_after, e2_before, e2_after = e1_sent_idx - 1, e1_sent_idx + 1, e2_sent_idx - 1, e2_sent_idx + 1
+                while True:
+                    e1_after_dead, e2_before_dead = False, False
+                    if e1_before >= 0:
+                        if total_length + self.sentences_lengths[e1_before] <= max_length:
+                            e1_before_context = self.sentences[e1_before]['text'] + ' ' + e1_before_context
+                            total_length += 1 + self.sentences_lengths[e1_before]
+                            e1_before -= 1
+                        else:
+                            e1_before = -1
+                    if e1_after <= e2_before:
+                        if total_length + self.sentences_lengths[e1_after] <= max_length:
+                            e1_after_context += ' ' + self.sentences[e1_after]['text']
+                            total_length += 1 + self.sentences_lengths[e1_after]
+                            e1_after += 1
+                        else:
+                            e1_after_dead = True
+                    if e2_before >= e1_after:
+                        if total_length + self.sentences_lengths[e2_before] <= max_length:
+                            e2_before_context = self.sentences[e2_before]['text'] + ' ' + e2_before_context
+                            total_length += 1 + self.sentences_lengths[e2_before]
+                            e2_before -= 1
+                        else:
+                            e2_before_dead = True
+                    if e2_after < len(self.sentences):
+                        if total_length + self.sentences_lengths[e2_after] <= max_length:
+                            e2_after_context += ' ' + self.sentences[e2_after]['text']
+                            total_length += 1 + self.sentences_lengths[e2_after]
+                            e2_after += 1
+                        else:
+                            e2_after = len(self.sentences)
+                    if e1_before == -1 and e2_after == len(self.sentences) and ((e1_after_dead and e2_before_dead) or e1_after > e2_before):
+                        break
+            tri1s_core_offset, tri1e_core_offset = e1s_offset + len(self.special_token_dict['e1s']) + 1, e1e_offset - 2
+            tri2s_core_offset, tri2e_core_offset = e2s_offset + len(self.special_token_dict['e2s']) + 1, e2e_offset - 2
+            assert e1_core_context[e1s_offset:e1e_offset] == self.special_token_dict['e1s'] + ' ' + e1_trigger + ' '
+            assert e1_core_context[e1e_offset:e1e_offset + len(self.special_token_dict['e1e'])] == self.special_token_dict['e1e']
+            assert e2_core_context[e2s_offset:e2e_offset] == self.special_token_dict['e2s'] + ' ' + e2_trigger + ' '
+            assert e2_core_context[e2e_offset:e2e_offset + len(self.special_token_dict['e2e'])] == self.special_token_dict['e2e']
+            assert e1_core_context[tri1s_core_offset:tri1e_core_offset+1] == e1_trigger
+            assert e2_core_context[tri2s_core_offset:tri2e_core_offset+1] == e2_trigger
+            return {
+                'type': 'diff_sent', 
+                'e1_core_context': e1_core_context, 
+                'e1_before_context': e1_before_context, 
+                'e1_after_context': e1_after_context, 
+                'e1s_core_offset': e1s_offset, 
+                'e1e_core_offset': e1e_offset, 
+                'tri1s_core_offset': tri1s_core_offset, 
+                'tri1e_core_offset': tri1e_core_offset, 
+                'e2_core_context': e2_core_context, 
+                'e2_before_context': e2_before_context, 
+                'e2_after_context': e2_after_context, 
+                'e2s_core_offset': e2s_offset, 
+                'e2e_core_offset': e2e_offset, 
+                'tri2s_core_offset': tri2s_core_offset, 
+                'tri2e_core_offset': tri2e_core_offset
+            }
+
     def _create_prompt(self, 
         e1_sent_idx:int, e1_sent_start:int, e1_trigger:str, e1_args: list, 
         e2_sent_idx:int, e2_sent_start:int, e2_trigger:str, e2_args: list
         ):
         e1_arg_str = self._convert_args_to_str(e1_args)
         e2_arg_str = self._convert_args_to_str(e2_args)
-        template_data = create_mix_template(e1_trigger, e2_trigger, e1_arg_str, e2_arg_str, '', '', 'm_hta_hn', self.special_token_dict)
+        template_data = self._create_mix_template(e1_trigger, e2_trigger, e1_arg_str, e2_arg_str)
         template_length = (
             len(self.tokenizer.tokenize(template_data['prefix_template'])) + 
             len(self.tokenizer.tokenize(template_data['e1_anchor_template'])) + 
@@ -422,11 +514,10 @@ class CorefPrompt():
             6
         )
         trigger_offsets = template_data['prefix_trigger_offsets']
-        context_data = create_event_context(
+        context_data = self._create_event_context(
             e1_sent_idx, e1_sent_start, e1_trigger, 
-            e2_sent_idx, e2_sent_start, e2_trigger,  
-            self.sentences, self.sentences_lengths, 
-            self.special_token_dict, self.tokenizer, 512 - template_length
+            e2_sent_idx, e2_sent_start, e2_trigger, 
+            512 - template_length
         )
         e1s_offset, e1e_offset = template_data['e1s_anchor_offset'], template_data['e1e_anchor_offset']
         e2s_offset, e2e_offset = template_data['e2s_anchor_offset'], template_data['e2e_anchor_offset']
@@ -529,8 +620,8 @@ class CorefPrompt():
                 'probability': probability \n
             }
         '''
-        assert self.document[e1_offset:e1_offset + len(e1_trigger)] == e1_trigger, 'You should first run `init_document(text)` to load text.'
-        assert self.document[e2_offset:e2_offset + len(e2_trigger)] == e2_trigger, 'You should first run `init_document(text)` to load text.'
+        if not self.document or self.document[e1_offset:e1_offset + len(e1_trigger)] != e1_trigger or self.document[e2_offset:e2_offset + len(e2_trigger)] != e2_trigger:
+            raise ValueError(f"Can't find event '{e1_trigger}' or '{e2_trigger}' in the document. You should first run `init_document(text)` to load text.")
         e1_sent_idx, e1_sent_start = find_event_sent(e1_offset, e1_trigger, self.sentences)
         e2_sent_idx, e2_sent_start = find_event_sent(e2_offset, e2_trigger, self.sentences)
         prompt_data = self._create_prompt(
@@ -540,25 +631,14 @@ class CorefPrompt():
         prompt_text = prompt_data['prompt']
         # convert char offsets to token idxs
         encoding = self.tokenizer(prompt_text)
-        mask_idx, type_match_mask_idx, arg_match_mask_idx = (
-            encoding.char_to_token(prompt_data['mask_offset']), 
-            encoding.char_to_token(prompt_data['type_match_mask_offset']), 
-            encoding.char_to_token(prompt_data['arg_match_mask_offset']), 
-        )
+        mask_idx = encoding.char_to_token(prompt_data['mask_offset'])
         e1s_idx, e1e_idx, e2s_idx, e2e_idx = (
             encoding.char_to_token(prompt_data['e1s_offset']), 
             encoding.char_to_token(prompt_data['e1e_offset']), 
             encoding.char_to_token(prompt_data['e2s_offset']), 
             encoding.char_to_token(prompt_data['e2e_offset'])
         )
-        e1_type_mask_idx, e2_type_mask_idx = (
-            encoding.char_to_token(prompt_data['e1_type_mask_offset']), 
-            encoding.char_to_token(prompt_data['e2_type_mask_offset'])
-        )
-        assert None not in [
-            mask_idx, type_match_mask_idx, arg_match_mask_idx, 
-            e1s_idx, e1e_idx, e2s_idx, e2e_idx, e1_type_mask_idx, e2_type_mask_idx
-        ]
+        assert None not in [mask_idx, e1s_idx, e1e_idx, e2s_idx, e2e_idx]
         event_idx = [e1s_idx, e1e_idx, e2s_idx, e2e_idx]
         inputs = self.tokenizer(
             prompt_text, 
@@ -570,26 +650,17 @@ class CorefPrompt():
         inputs = {
             'batch_inputs': inputs, 
             'batch_mask_idx': [mask_idx], 
-            'batch_type_match_mask_idx': [type_match_mask_idx], 
-            'batch_arg_match_mask_idx': [arg_match_mask_idx], 
             'batch_event_idx': [event_idx], 
-            'batch_t1_mask_idx': [e1_type_mask_idx], 
-            'batch_t2_mask_idx': [e2_type_mask_idx], 
-            'label_word_id': [self.verbalizer['non-coref']['id'], self.verbalizer['coref']['id']], 
-            'match_label_word_id': [self.verbalizer['match']['id'], self.verbalizer['mismatch']['id']], 
-            'subtype_label_word_id': [
-                self.verbalizer[id2subtype[s_id]]['id'] 
-                for s_id in range(len(EVENT_SUBTYPES) + 1)
-            ]
+            'label_word_id': [self.verbalizer['non-coref']['id'], self.verbalizer['coref']['id']]
         }
         inputs = to_device(self.device, inputs)
         with torch.no_grad():
-            outputs = self.model(**inputs)
-            logits = outputs[1]
+            logits = self.model(**inputs)
             prob = torch.nn.functional.softmax(logits, dim=-1)[0]
         pred = logits.argmax(dim=-1)[0].item()
         prob = prob[pred].item()
         return {
+            'prompt': prompt_text, 
             'label': 'coref' if pred == 1 else 'non-coref', 
             'probability': prob
         }
@@ -630,4 +701,3 @@ class CorefPrompt():
         '''
         self.init_document(document)
         return self.predict_coref(event1, event2)
-    

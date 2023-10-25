@@ -80,33 +80,33 @@ ev5 = {
 }
 ```
 
-First, we need to set the `args` variable that organizes all parameters:
+First, we need to create a CorefPrompt model by passing `model_checkpoint` and `best_weights`, which are paths to the RoBERTa checkpoint and our best weights, respectively:
 
 ```python
-from corefprompt import args, CorefPrompt
+from corefprompt import CorefPrompt
 
-args.model_checkpoint='../PT_MODELS/roberta-large/'
-args.best_weights='./epoch_2_dev_f1_71.5876_weights.bin'
-
-coref_model = CorefPrompt(args.model_checkpoint, args.best_weights, args)
+model_checkpoint='../PT_MODELS/roberta-large/'
+best_weights='./epoch_2_dev_f1_71.5876_weights.bin'
+coref_model = CorefPrompt(model_checkpoint, best_weights)
 ```
-
-Here, `args.model_checkpoint` and `args.best_weights` are paths to the checkpoint and our trained weights, respectively.
 
 > RoBERTa checkpoint can be downloaded by running the script `download_pt_models.sh` above, and our best weights `epoch_2_dev_f1_71.5876_weights.bin` can be downloaded from [Google Drive](https://drive.google.com/drive/folders/1XoJBHIEaCbH8bf0Sdd9vJVqNRS6r9SUV?usp=share_link).
 
 We provide two functions to predict event coreferences:
 
-- **CorefPrompt.predict_coref(event1, event2)**: suitable for processing multiple event pairs located in the same document. It is necessary to first initialize the corresponding document using the `CorefPrompt.init_document(doc)` function.
-- **CorefPrompt.predict_coref_in_doc(document, event1, event2)**: directly predict coreference between the event pair located in a document.
+- **predict_coref(event1, event2)**: suitable for processing multiple event pairs located in the same document. It is necessary to first load the corresponding document using the `init_document(doc)` function.
+- **predict_coref_in_doc(document, event1, event2)**: directly predict coreference between the event pair located in a document.
 
 ```python
 # direct predict event pairs
 res = coref_model.predict_coref_in_doc(document, ev1, ev5)
+print('[Prompt]:', res['prompt'])
 print(f"ev1[{ev1['trigger']}] - ev5[{ev5['trigger']}]: {res['label']} ({res['probability']})")
 ```
 
 ```
+[Prompt]: In the following text, the focus is on the events expressed by <e1_start> suicide <e1_end> and <e2_start> death <e2_end>, and it needs to judge whether they refer to the same or different events: Former Pakistani dancing girl commits <e1_start> suicide <e1_end> 12 years after horrific acid attack which left her looking "not human". Here <e1_start> suicide <e1_end> expresses a <mask> event with Former Pakistani dancing girl as participants. She had undergone 39 separate surgeries to repair damage. Leapt to her <e2_start> death <e2_end> from sixth floor Rome building earlier this month. Here <e2_start> death <e2_end> expresses a <mask> event with her as participants at sixth floor Rome building. Her ex-husband was charged with attempted murder in 2002 but has since been acquitted. In conclusion, the events expressed by <e1_start> suicide <e1_end> and <e2_start> death <e2_end> have <mask> event type and <mask> participants, so they refer to <mask> event.
+
 ev1[suicide] - ev5[death]: coref (0.9997438788414001)
 ```
 
