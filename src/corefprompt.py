@@ -180,35 +180,26 @@ def to_device(device, batch_data):
     return new_batch_data
 
 class CorefPrompt():
-    def __init__(self, model_checkpoint, best_weights) -> None:
+    def __init__(self, model_checkpoint) -> None:
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
         self.model = self._init_model(model_checkpoint)
         self.tokenizer = self._init_tokenizer(model_checkpoint)
-        self.verbalizer = self._init_verbalizer()
-        self.model.load_state_dict(torch.load(os.path.join(best_weights), map_location=torch.device(self.device)))
-        self.special_token_dict = self._init_special_token_dict()
+        self.verbalizer = self._create_verbalizer()
+        self.special_token_dict = self._create_special_token_dict()
         self.document = ''
         self.sentences = ''
         self.sentences_lengths = []
-    
+
     def _init_model(self, model_checkpoint):
         config = AutoConfig.from_pretrained(model_checkpoint)
         model = RobertaForMixPrompt.from_pretrained(
-            model_checkpoint,
+            model_checkpoint, 
             config=config
         ).to(self.device)
         return model
 
     def _init_tokenizer(self, model_checkpoint):
         tokenizer = AutoTokenizer.from_pretrained(model_checkpoint)
-        # add special tokens
-        sp_tokens = [
-            '<e1_start>', '<e1_end>', '<e2_start>', '<e2_end>', 
-            '<l1>', '<l2>', '<l3>', '<l4>', '<l5>', '<l6>', '<l7>', '<l8>', '<l9>', '<l10>', 
-            '<match>', '<mismatch>'
-        ] + [f'<st_{i}>' for i in range(len(EVENT_SUBTYPES) + 1)]
-        tokenizer.add_special_tokens({'additional_special_tokens': sp_tokens})
-        self.model.resize_token_embeddings(len(tokenizer))
         return tokenizer
 
     def _create_verbalizer(self):
@@ -236,33 +227,7 @@ class CorefPrompt():
             }
         return base_verbalizer
 
-    def _init_verbalizer(self):
-        verbalizer = self._create_verbalizer()
-        # initialize embeddings for 'match' and 'mismatch' token
-        subtype_sp_token_num = len(EVENT_SUBTYPES) + 1
-        match_idx, mismatch_idx = -(subtype_sp_token_num+2), -(subtype_sp_token_num+1)
-        with torch.no_grad():
-            match_tokenized = self.tokenizer.tokenize(verbalizer['match']['description'])
-            match_tokenized_ids = self.tokenizer.convert_tokens_to_ids(match_tokenized)
-            mismatch_tokenized = self.tokenizer.tokenize(verbalizer['mismatch']['description'])
-            mismatch_tokenized_ids = self.tokenizer.convert_tokens_to_ids(mismatch_tokenized)
-            new_embedding = self.model.roberta.embeddings.word_embeddings.weight[match_tokenized_ids].mean(axis=0)
-            self.model.roberta.embeddings.word_embeddings.weight[match_idx, :] = new_embedding.clone().detach().requires_grad_(True)
-            new_embedding = self.model.roberta.embeddings.word_embeddings.weight[mismatch_tokenized_ids].mean(axis=0)
-            self.model.roberta.embeddings.word_embeddings.weight[mismatch_idx, :] = new_embedding.clone().detach().requires_grad_(True)
-        # initialize embeddings for event subtype special tokens
-        subtype_descriptions = [
-            verbalizer[id2subtype[s_id]]['description'] for s_id in range(len(EVENT_SUBTYPES) + 1)
-        ]
-        with torch.no_grad():
-            for i, description in enumerate(reversed(subtype_descriptions), start=1):
-                tokenized = self.tokenizer.tokenize(description)
-                tokenized_ids = self.tokenizer.convert_tokens_to_ids(tokenized)
-                new_embedding = self.model.roberta.embeddings.word_embeddings.weight[tokenized_ids].mean(axis=0)
-                self.model.roberta.embeddings.word_embeddings.weight[-i, :] = new_embedding.clone().detach().requires_grad_(True)
-        return verbalizer
-    
-    def _init_special_token_dict(self):
+    def _create_special_token_dict(self):
         special_token_dict = {
             'mask': '<mask>', 'e1s': '<e1_start>', 'e1e': '<e1_end>', 'e2s': '<e2_start>', 'e2e': '<e2_end>', 
             'l1': '<l1>', 'l2': '<l2>', 'l3': '<l3>', 'l4': '<l4>', 'l5': '<l5>', 'l6': '<l6>', 

@@ -1,4 +1,4 @@
-# CorefPrompt: Prompt-based Event Coreference Resolution by Measuring Event Type and Argument Compatibilities
+# CorefPrompt: Prompt-based Event Coreference Resolver
 
 This code was used in the paper:
 
@@ -21,17 +21,11 @@ conda activate corefprompt
 python3 -m pip install -r requirements.txt
 ```
 
-Download the pre-trained model weights used in our experiment from Huggingface [Model Hub](https://huggingface.co/models):
-
-```bash
-bash download_pt_models.sh
-```
-
-**Note:** this script will save all downloaded weights in `./PT_MODELS/`.
-
 ## How to use
 
-It is easy to use our model to predict event coreferences. For example, consider the following text, which contains seven event mentions (ev1-ev7) and ten entity mentions (arg1-arg10) that serve as arguments. 
+It is easy to use our model to predict event coreferences. 
+
+For example, consider the following text, which contains seven event mentions (ev1-ev7) and ten entity mentions (arg1-arg10) that serve as arguments. 
 
 ![example](example.jpg)
 
@@ -80,22 +74,21 @@ ev5 = {
 }
 ```
 
-First, we need to create a CorefPrompt model by passing `model_checkpoint` and `best_weights`, which are paths to the RoBERTa checkpoint and our best weights, respectively:
+First, you need to create a CorefPrompt model by loading our provided checkpoint *coref-prompt-large* (can be downloaded from [Google Drive](https://drive.google.com/drive/folders/1XoJBHIEaCbH8bf0Sdd9vJVqNRS6r9SUV?usp=share_link)):
 
 ```python
 from corefprompt import CorefPrompt
 
-model_checkpoint='../PT_MODELS/roberta-large/'
-best_weights='./epoch_2_dev_f1_71.5876_weights.bin'
-coref_model = CorefPrompt(model_checkpoint, best_weights)
+model_checkpoint = './coref-prompt-large'
+coref_model = CorefPrompt(model_checkpoint)
 ```
-
-> RoBERTa checkpoint can be downloaded by running the script `download_pt_models.sh` above, and our best weights `epoch_2_dev_f1_71.5876_weights.bin` can be downloaded from [Google Drive](https://drive.google.com/drive/folders/1XoJBHIEaCbH8bf0Sdd9vJVqNRS6r9SUV?usp=share_link).
 
 We provide two functions to predict event coreferences:
 
 - **predict_coref(event1, event2)**: suitable for processing multiple event pairs located in the same document. It is necessary to first load the corresponding document using the `init_document(doc)` function.
 - **predict_coref_in_doc(document, event1, event2)**: directly predict coreference between the event pair located in a document.
+
+Here are some usage examples:
 
 ```python
 # direct predict event pairs
@@ -135,6 +128,14 @@ You can modify the [demo.py](https://github.com/jsksxs360/prompt-event-coref-emn
 ## Training & Evaluation on the KBP corpus
 
 ### Preparation
+
+Download the pre-trained model weights used in our experiment from Huggingface [Model Hub](https://huggingface.co/models):
+
+```bash
+bash download_pt_models.sh
+```
+
+**Note:** this script will save all downloaded weights in `./PT_MODELS/`.
 
 #### Download the evaluation script
 
@@ -318,9 +319,7 @@ python3 run_cluster.py \
 
 ### Results
 
-You can download the final **Event Similarity Scorer** & **CorefPrompt (event coreference model)** weights at:
-
-[https://drive.google.com/drive/folders/1XoJBHIEaCbH8bf0Sdd9vJVqNRS6r9SUV?usp=share_link](https://drive.google.com/drive/folders/1XoJBHIEaCbH8bf0Sdd9vJVqNRS6r9SUV?usp=share_link)
+You can download the final **event similarity scorer** and our **best weights** at [Google Drive](https://drive.google.com/drive/folders/1XoJBHIEaCbH8bf0Sdd9vJVqNRS6r9SUV?usp=share_link).
 
 | Model                                                        | MUC  | B3   | CEA  | BLA  | AVG  |
 | ------------------------------------------------------------ | ---- | ---- | ---- | ---- | ---- |
