@@ -2,7 +2,7 @@
 
 This code was used in the paper:
 
-"[CorefPrompt: Prompt-based Event Coreference Resolution by Measuring Event Type and Argument Compatibilities](https://arxiv.org/abs/2310.14512)"  
+"[CorefPrompt: Prompt-based Event Coreference Resolution by Measuring Event Type and Argument Compatibilities](https://aclanthology.org/2023.emnlp-main.954/)"  
 Sheng Xu, Peifeng Li and Qiaoming Zhu. EMNLP 2023.
 
 A simple prompt-based model for predicting event pair coreferences. The model was trained and evaluated on the KBP corpus.
