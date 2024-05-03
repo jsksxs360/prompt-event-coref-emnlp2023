@@ -325,15 +325,13 @@ def get_gold_corefs(gold_test_file:str) -> dict:
             events = sample['events']
             event_pairs = {}
             for i in range(len(events) - 1):
-                e_i_start = events[i]['start']
-                e_i_cluster_id, e_i_link_len = _get_event_cluster_id_and_link_len(events[i]['event_id'], clusters)
                 for j in range(i + 1, len(events)):
-                    e_j_start = events[j]['start']
-                    e_j_cluster_id, e_j_link_len = _get_event_cluster_id_and_link_len(events[j]['event_id'], clusters)
-                    if e_i_start > e_j_start:
-                        e_i_start, e_j_start = e_j_start, e_i_start
-                        e_i_cluster_id, e_i_link_len, e_j_cluster_id, e_j_link_len = e_j_cluster_id, e_j_link_len, e_i_cluster_id, e_i_link_len
-                    event_pairs[f'{e_i_start}-{e_j_start}'] = {
+                    e_i, e_j = events[i], events[j]
+                    if e_i['start'] > e_j['start']:
+                        e_i, e_j = e_j, e_i
+                    e_i_cluster_id, e_i_link_len = _get_event_cluster_id_and_link_len(e_i['event_id'], clusters)
+                    e_j_cluster_id, e_j_link_len = _get_event_cluster_id_and_link_len(e_j['event_id'], clusters)
+                    event_pairs[f"{e_i['start']}-{e_j['start']}"] = {
                         'coref': 1 if e_i_cluster_id == e_j_cluster_id else 0, 
                         'e_i_link_len': e_i_link_len, 'e_j_link_len': e_j_link_len
                     }
@@ -350,11 +348,11 @@ def get_pred_coref_results(pred_test_file:str) -> dict:
             event_pairs = {}
             event_pair_idx = 0
             for i in range(len(events) - 1):
-                e_i_start = events[i]['start']
                 for j in range(i + 1, len(events)):
-                    e_j_start = events[j]['start']
-                    assert e_i_start < e_j_start
-                    event_pairs[f'{e_i_start}-{e_j_start}'] = {
+                    e_i, e_j = events[i], events[j]
+                    if e_i['start'] > e_j['start']:
+                        e_i, e_j = e_j, e_i
+                    event_pairs[f"{e_i['start']}-{e_j['start']}"] = {
                         'coref': pred_labels[event_pair_idx], 
                         'e_i_link_len': 0, 'e_j_link_len': 0
                     }
