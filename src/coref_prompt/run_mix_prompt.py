@@ -496,6 +496,8 @@ if __name__ == '__main__':
                     for i in range(len(events_from_file) - 1):
                         for j in range(i + 1, len(events_from_file)):
                             e_i, e_j = events_from_file[i], events_from_file[j]
+                            if e_i['start'] > e_j['start']:
+                                e_i, e_j = e_j, e_i
                             pred, prob = predict(
                                 args, model, tokenizer,
                                 e_i['start'], e_i['trigger'], doc_related_info[e_i['start']], 

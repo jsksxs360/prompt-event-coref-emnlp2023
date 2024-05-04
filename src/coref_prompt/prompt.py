@@ -68,7 +68,7 @@ def create_event_context(
         offsets of triggers in the host sentence
     '''
     if e1_sent_idx == e2_sent_idx: # two events in the same sentence
-        assert e1_sent_start < e2_sent_start
+        assert e1_sent_start <= e2_sent_start
         e1_e2_sent = sentences[e1_sent_idx]['text']
         core_context_before = f"{e1_e2_sent[:e1_sent_start]}"
         core_context_after = f"{e1_e2_sent[e2_sent_start + len(e2_trigger):]}"
